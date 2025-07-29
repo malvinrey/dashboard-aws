@@ -269,4 +269,22 @@ class ScadaDataService
             'datasets' => $datasets,
         ];
     }
+    public function getLatestDataForTags(array $tags): ?array
+    {
+        $latestRecord = ScadaDataTall::orderBy('timestamp_device', 'desc')->first();
+        if (!$latestRecord) return null;
+
+        $latestBatchData = ScadaDataTall::where('batch_id', $latestRecord->batch_id)
+            ->whereIn('nama_tag', $tags)
+            ->get();
+
+        if ($latestBatchData->isEmpty()) return null;
+
+        $dataToDispatch = [
+            'timestamp' => $latestRecord->timestamp_device,
+            'metrics' => $latestBatchData->pluck('nilai_tag', 'nama_tag')->toArray(),
+        ];
+
+        return $dataToDispatch;
+    }
 }

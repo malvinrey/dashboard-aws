@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Historical Data Analysis (Non-Livewire)</title>
+    <title>Livewire Chart Analysis</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
     <style>
         /* ---------------------------------- */
@@ -407,6 +407,7 @@
             border: 1px solid var(--border-color);
         }
     </style>
+    @livewireStyles
 </head>
 
 <body>
@@ -505,23 +506,46 @@
                 @else
                     <p>No data available to analyze.</p>
                 @endif
+                <livewire:analysis-chart />
             </div>
             {{-- Chart Canvas --}}
             <div class="chart-container">
                 <canvas id="historicalChart"></canvas>
+                <div style="margin-top: 10px; font-size: 12px; color: #6c757d; text-align: center;">
+                    <strong>Zoom & Pan Controls:</strong><br>
+                    • Mouse wheel: Zoom in/out | • Ctrl + Drag: Pan | • Drag to select area for zoom | • Touch: Pinch to
+                    zoom, drag to pan
+                </div>
             </div>
         </div>
     </div>
 
-    {{-- Memuat library Chart.js dari CDN --}}
+    {{-- Memuat library dengan urutan yang benar --}}
+    {{-- 1. Hammer.js harus dimuat terlebih dahulu --}}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+
+    {{-- 2. Chart.js --}}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    {{-- 3. Date adapter untuk Chart.js --}}
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js">
     </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+
+    {{-- 4. Zoom plugin --}}
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom/dist/chartjs-plugin-zoom.min.js"></script>
 
     <script>
+        // Pastikan plugin zoom tersedia secara global
+        window.addEventListener('load', () => {
+            if (typeof Chart !== 'undefined' && typeof window.zoomPlugin !== 'undefined') {
+                Chart.register(window.zoomPlugin);
+            }
+        });
+        @livewireScripts
         document.addEventListener('DOMContentLoaded', () => {
+            // Inisialisasi plugin zoom
+            const zoomPlugin = window.zoomPlugin;
+
             const intervalButtons = document.querySelectorAll('.interval-buttons button');
             const startDateInput = document.getElementById('start-date');
             const startTimeInput = document.getElementById('start-time');
@@ -615,46 +639,80 @@
                             type: 'line',
                             data: {
                                 labels: chartData.labels,
-                                datasets: chartData.datasets // <-- LANGSUNG GUNAKAN DARI API
+                                datasets: chartData.datasets
                             },
                             options: {
                                 responsive: true,
                                 maintainAspectRatio: false,
+                                interaction: {
+                                    mode: 'index',
+                                    intersect: false,
+                                },
                                 scales: {
                                     x: {
                                         type: 'time',
                                         time: {
                                             tooltipFormat: 'yyyy-MM-dd HH:mm:ss',
                                             displayFormats: {
-                                                hour: 'MMM d, HH:mm'
+                                                hour: 'MMM d, HH:mm',
+                                                day: 'MMM d',
+                                                minute: 'HH:mm',
+                                                second: 'HH:mm:ss'
                                             }
                                         },
                                         title: {
                                             display: true,
                                             text: 'Timestamp'
+                                        },
+                                        grid: {
+                                            display: true
                                         }
                                     },
                                     y: {
-                                        beginAtZero: false
+                                        beginAtZero: false,
+                                        title: {
+                                            display: true,
+                                            text: 'Value'
+                                        },
+                                        grid: {
+                                            display: true
+                                        }
                                     }
                                 },
                                 plugins: {
                                     legend: {
-                                        display: true, // Menyembunyikan legend
+                                        display: true,
+                                        position: 'top'
+                                    },
+                                    tooltip: {
+                                        enabled: true,
+                                        mode: 'index',
+                                        intersect: false
                                     },
                                     zoom: {
                                         pan: {
-                                            enabled: true, // Mengaktifkan geser (pan)
-                                            mode: 'x', // Hanya geser pada sumbu X (waktu)
+                                            enabled: true,
+                                            mode: 'x',
+                                            modifierKey: 'ctrl',
+                                            threshold: 10
                                         },
                                         zoom: {
                                             wheel: {
-                                                enabled: true, // Mengaktifkan zoom dengan roda mouse
+                                                enabled: true,
+                                                speed: 0.1
                                             },
                                             pinch: {
-                                                enabled: true // Mengaktifkan zoom dengan cubitan (touchscreen)
+                                                enabled: true
                                             },
-                                            mode: 'x', // Hanya zoom pada sumbu X
+                                            mode: 'x',
+                                            drag: {
+                                                enabled: true,
+                                                backgroundColor: 'rgba(225,225,225,0.3)',
+                                                borderColor: 'rgba(225,225,225)',
+                                                borderWidth: 1,
+                                                threshold: 10
+                                            },
+                                            mode: 'x'
                                         }
                                     }
                                 }
@@ -714,7 +772,7 @@
 
             // Atur event listener untuk tombol Reset Zoom
             resetZoomBtn?.addEventListener('click', () => {
-                if (historicalChart) {
+                if (historicalChart && historicalChart.resetZoom) {
                     historicalChart.resetZoom();
                 }
             });
@@ -728,6 +786,127 @@
             if (hasCheckedTags) {
                 updateChart();
             }
+
+            // === Listener untuk event BERAT: Mengganti seluruh data grafik ===
+            // Dipicu oleh loadChartData()
+            document.addEventListener('chart-data-updated', event => {
+                const chartData = event.detail.chartData;
+                if (!historicalChart) {
+                    // Buat chart jika belum ada
+                    historicalChart = new Chart(ctx, {
+                        type: 'line',
+                        data: chartData,
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: {
+                                mode: 'index',
+                                intersect: false,
+                            },
+                            scales: {
+                                x: {
+                                    type: 'time',
+                                    time: {
+                                        tooltipFormat: 'yyyy-MM-dd HH:mm:ss',
+                                        displayFormats: {
+                                            hour: 'MMM d, HH:mm',
+                                            day: 'MMM d',
+                                            minute: 'HH:mm',
+                                            second: 'HH:mm:ss'
+                                        }
+                                    },
+                                    title: {
+                                        display: true,
+                                        text: 'Timestamp'
+                                    },
+                                    grid: {
+                                        display: true
+                                    }
+                                },
+                                y: {
+                                    beginAtZero: false,
+                                    title: {
+                                        display: true,
+                                        text: 'Value'
+                                    },
+                                    grid: {
+                                        display: true
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: true,
+                                    position: 'top'
+                                },
+                                tooltip: {
+                                    enabled: true,
+                                    mode: 'index',
+                                    intersect: false
+                                },
+                                zoom: {
+                                    pan: {
+                                        enabled: true,
+                                        mode: 'x',
+                                        modifierKey: 'ctrl',
+                                        threshold: 10
+                                    },
+                                    zoom: {
+                                        wheel: {
+                                            enabled: true,
+                                            speed: 0.1
+                                        },
+                                        pinch: {
+                                            enabled: true
+                                        },
+                                        mode: 'x',
+                                        drag: {
+                                            enabled: true,
+                                            backgroundColor: 'rgba(225,225,225,0.3)',
+                                            borderColor: 'rgba(225,225,225)',
+                                            borderWidth: 1,
+                                            threshold: 10
+                                        },
+                                        mode: 'x'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    // Ganti seluruh data
+                    historicalChart.data.labels = chartData.labels;
+                    historicalChart.data.datasets = chartData.datasets;
+                    historicalChart.update('none');
+                }
+            });
+
+            // === Listener untuk event RINGAN: Menambahkan satu titik data baru ===
+            // Dipicu oleh getLatestDataPoint()
+            document.addEventListener('new-data-point', event => {
+
+                if (!historicalChart || historicalChart.data.labels.length === 0) return;
+
+                const newData = event.detail.data;
+
+                // Cek duplikasi
+                const lastLabel = historicalChart.data.labels[historicalChart.data.labels.length - 1];
+                if (lastLabel && new Date(newData.timestamp) <= new Date(lastLabel)) {
+                    return;
+                }
+
+                // TAMBAHKAN data baru ke ujung grafik
+                historicalChart.data.labels.push(newData.timestamp);
+                historicalChart.data.datasets.forEach(dataset => {
+                    dataset.data.push(newData.metrics[dataset.label] ?? null);
+                });
+
+                // HAPUS data tertua dari awal grafik
+                historicalChart.data.labels.shift();
+                historicalChart.data.datasets.forEach(dataset => dataset.data.shift());
+
+                historicalChart.update('none');
+            });
         });
     </script>
 </body>

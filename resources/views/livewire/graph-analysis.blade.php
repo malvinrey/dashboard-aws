@@ -1,12 +1,11 @@
-<div wire:poll.5s>
-    {{-- Filter Controls dengan direktif Livewire --}}
+<div wire:poll.5s="getLatestDataPoint">
     <div class="filters">
         <div class="filter-group">
             <label>Select Metrics:</label>
             <div id="tag-checkboxes">
                 @foreach ($allTags as $tag)
                     <div class="checkbox-item">
-                        <input type="checkbox" id="tag-{{ $loop->index }}" wire:model.live="selectedTags"
+                        <input type="checkbox" id="tag-{{ $loop->index }}" wire:model="selectedTags"
                             value="{{ $tag }}">
                         <label for="tag-{{ $loop->index }}">{{ $tag }}</label>
                     </div>
@@ -28,16 +27,17 @@
         </div>
         <div class="filter-group">
             <label for="start-date">Start Date:</label>
-            <input type="date" id="start-date" wire:model.live="startDate">
+            <input type="date" id="start-date" wire:model="startDate">
         </div>
         <div class="filter-group">
             <label for="end-date">End Date:</label>
-            <input type="date" id="end-date" wire:model.live="endDate">
+            <input type="date" id="end-date" wire:model="endDate">
         </div>
-        {{-- Tombol "Apply Filter" tidak lagi diperlukan karena .live membuat update instan --}}
+        <div class="filter-group">
+            <button wire:click="loadChartData">Apply Filter</button>
+        </div>
     </div>
 
-    {{-- Chart Canvas. wire:ignore penting agar Livewire tidak mengganggu Chart.js --}}
     <div class="chart-container" wire:ignore>
         <canvas id="historicalChart"></canvas>
     </div>

@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\AnalysisController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -22,4 +21,6 @@ Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard
 
 Route::get('/log-data', [DashboardController::class, 'logData'])->name('log-data');
 
-Route::get('/analysis', [AnalysisController::class, 'index'])->name('analysis');
+use App\Livewire\AnalysisChart;
+
+Route::get('/analysis', AnalysisChart::class);

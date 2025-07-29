@@ -22,14 +22,11 @@ class AnalysisController extends Controller
     }
 
     /**
-     * Menampilkan halaman utama analisa.
+     * Menampilkan halaman utama analisa menggunakan Livewire component.
      */
     public function index()
     {
-        // Ambil daftar tag untuk mengisi filter saat halaman pertama kali dimuat
-        $allTags = $this->scadaDataService->getUniqueTags();
-
-        return view('views-graph-analysis', ['allTags' => $allTags]);
+        return app(\App\Livewire\AnalysisChart::class);
     }
 
     /**
