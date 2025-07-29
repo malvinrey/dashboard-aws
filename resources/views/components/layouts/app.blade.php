@@ -8,9 +8,7 @@
     {{-- Menggunakan Google Fonts untuk tipografi yang lebih baik --}}
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap">
     <style>
-        /* ---------------------------------- */
-        /* Variabel Global & Gaya Dasar      */
-        /* ---------------------------------- */
+        /* Semua gaya CSS dari versi sebelumnya tetap sama */
         :root {
             --border-color: #e5e7eb;
             --text-primary: #111827;
@@ -32,8 +30,6 @@
             margin: 0;
             background-color: var(--bg-light);
             color: var(--text-primary);
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
 
         .dashboard-container {
@@ -42,9 +38,6 @@
             margin: 0 auto;
         }
 
-        /* ---------------------------------- */
-        /* Header & Tab                       */
-        /* ---------------------------------- */
         .header-frame {
             display: flex;
             justify-content: space-between;
@@ -116,9 +109,6 @@
             border-bottom: 2px solid var(--primary-color);
         }
 
-        /* ---------------------------------- */
-        /* Kontainer Utama & Filter           */
-        /* ---------------------------------- */
         .chart-page-container {
             background-color: var(--bg-white);
             padding: 24px;
@@ -147,10 +137,9 @@
             font-size: 14px;
         }
 
-        /* Gaya konsisten untuk semua input, select, dan tombol */
         .filter-group input[type="date"],
+        .filter-group select,
         .interval-buttons button,
-        .selected-metrics-display,
         .btn-primary {
             height: 42px;
             padding: 0 14px;
@@ -164,18 +153,16 @@
         }
 
         .filter-group input[type="date"]:focus,
-        .interval-buttons button:focus,
-        .selected-metrics-display:focus-within {
+        .filter-group select:focus,
+        .interval-buttons button:focus {
             outline: none;
             border-color: var(--primary-color);
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
         }
 
-        /* Tombol Interval */
         .interval-buttons {
             display: flex;
             gap: -1px;
-            /* Membuat tombol saling menempel */
         }
 
         .interval-buttons button {
@@ -201,7 +188,6 @@
             z-index: 1;
         }
 
-        /* Tombol Aksi Utama */
         .btn-primary {
             background-color: var(--primary-color);
             color: white;
@@ -218,135 +204,10 @@
             background-color: var(--primary-hover-color);
         }
 
-        /* ---------------------------------- */
-        /* Pemilih Metrik Kustom              */
-        /* ---------------------------------- */
-        .metric-selector {
-            position: relative;
-            min-width: 250px;
-        }
-
-        .selected-metrics-display {
+        /* Gaya khusus untuk dropdown metric */
+        .metric-dropdown {
+            min-width: 200px;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 6px;
-        }
-
-        .selected-metrics-display.open {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
-        }
-
-        .display-tags-container {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-wrap: nowrap;
-            overflow: hidden;
-        }
-
-        .selected-metrics-display .placeholder {
-            color: var(--text-secondary);
-        }
-
-        .metric-pill {
-            display: inline-flex;
-            align-items: center;
-            background-color: #e0e7ff;
-            color: #4338ca;
-            padding: 4px 8px;
-            border-radius: 1rem;
-            font-size: 13px;
-            font-weight: 500;
-            white-space: nowrap;
-        }
-
-        .more-tags-indicator {
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-secondary);
-            white-space: nowrap;
-        }
-
-        .caret {
-            width: 0;
-            height: 0;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 5px solid var(--text-secondary);
-            transition: transform 0.2s ease;
-            flex-shrink: 0;
-        }
-
-        .caret.open {
-            transform: rotate(180deg);
-        }
-
-        .metric-overlay {
-            position: absolute;
-            top: calc(100% + 4px);
-            left: 0;
-            right: 0;
-            background-color: var(--bg-white);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            box-shadow: var(--shadow-lg);
-            z-index: 1000;
-            display: none;
-        }
-
-        .metric-overlay.show {
-            display: block;
-        }
-
-        .tag-checkboxes {
-            max-height: 220px;
-            overflow-y: auto;
-            padding: 8px;
-        }
-
-        .checkbox-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-        }
-
-        .checkbox-item:hover {
-            background-color: var(--bg-light);
-        }
-
-        .checkbox-item input[type="checkbox"] {
-            width: 16px;
-            height: 16px;
-            margin: 0;
-            accent-color: var(--primary-color);
-        }
-
-        .checkbox-item label {
-            font-size: 14px;
-            color: var(--text-primary);
-            cursor: pointer;
-            margin: 0;
-            flex: 1;
-            font-weight: 400;
-            /* Reset bobot font */
-        }
-
-        /* ---------------------------------- */
-        /* Kontainer Chart & Overlay Loading  */
-        /* ---------------------------------- */
-        .chart-container {
-            position: relative;
-            width: 100%;
-            height: 450px;
-            border-radius: var(--radius-lg);
-            overflow: hidden;
-            background-color: var(--bg-white);
         }
 
         .loading-overlay {
@@ -372,6 +233,104 @@
             animation: spin 1s linear infinite;
         }
 
+        /* Icon loading kecil untuk data real-time */
+        .realtime-loading-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 50%;
+            padding: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transform: scale(0.8);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .realtime-loading-indicator[wire\\:loading] {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        /* Tooltip untuk icon loading */
+        .realtime-loading-indicator:hover::after {
+            content: attr(title);
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: 100%;
+            margin-bottom: 8px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1001;
+        }
+
+        /* Status indicator untuk real-time data */
+        .realtime-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 50%;
+            padding: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .status-dot-green {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: #10b981;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+            animation: pulse 2s infinite;
+        }
+
+        /* Tooltip untuk status indicator */
+        .realtime-status:hover::after {
+            content: attr(title);
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: 100%;
+            margin-bottom: 8px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1001;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 16px rgba(16, 185, 129, 0.8);
+            }
+
+            100% {
+                box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+            }
+        }
+
+        .realtime-spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid #10b981;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+
         @keyframes spin {
             0% {
                 transform: rotate(0deg);
@@ -381,13 +340,23 @@
                 transform: rotate(360deg);
             }
         }
+
+        /* Gaya untuk single chart */
+        .single-chart-container {
+            position: relative;
+            width: 100%;
+            height: 450px;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            background-color: var(--bg-white);
+            border: 1px solid var(--border-color);
+        }
     </style>
     @livewireStyles
 </head>
 
 <body>
     <div class="dashboard-container">
-        <!-- Header Section -->
         <div class="dashboard-title">
             <div class="header-frame">
                 <div class="title-status-container">
@@ -400,28 +369,23 @@
             </div>
             <div class="tabs">
                 <div class="tab-item">
-                    <div class="tab-text">
-                        <a href="{{ url('/') }}" class="{{ request()->is('/') ? 'active' : '' }}">Overview</a>
-                    </div>
-                    <div class="tab-text">
-                        <a href="{{ url('/log-data') }}" class="{{ request()->is('log-data') ? 'active' : '' }}">Log
-                            Data</a>
-                    </div>
-                    <div class="tab-text">
-                        <a href="{{ url('/analysis') }}"
-                            class="{{ request()->is('analysis') ? 'active' : '' }}">Analysis Chart</a>
-                    </div>
+                    <div class="tab-text"><a href="{{ url('/') }}"
+                            class="{{ request()->is('/') ? 'active' : '' }}">Overview</a></div>
+                    <div class="tab-text"><a href="{{ url('/log-data') }}"
+                            class="{{ request()->is('log-data') ? 'active' : '' }}">Log Data</a></div>
+                    <div class="tab-text"><a href="{{ url('/analysis') }}"
+                            class="{{ request()->is('analysis') ? 'active' : '' }}">Analysis Chart</a></div>
                 </div>
             </div>
         </div>
 
-        {{-- Main Content Section --}}
         <div class="chart-page-container">
             {{ $slot }}
         </div>
     </div>
 
-    {{-- Chart.js dan dependencies --}}
+    {{-- KUNCI: Hammer.js HARUS dimuat SEBELUM Chart.js untuk dukungan gestur mobile --}}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js">
     </script>
@@ -429,109 +393,6 @@
 
     {{-- Livewire Scripts --}}
     @livewireScripts
-
-    <script>
-        // Menjalankan skrip setelah DOM atau navigasi Livewire selesai
-        document.addEventListener('livewire:navigated', () => {
-            const ctx = document.getElementById('historicalChart')?.getContext('2d');
-            if (!ctx) return;
-
-            let historicalChart;
-
-            // Fungsi untuk membuat atau memperbarui chart
-            function createOrUpdateChart(chartData) {
-                const chartOptions = {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            type: 'time',
-                            time: {
-                                unit: 'minute', // Unit bisa dinamis berdasarkan interval
-                                tooltipFormat: 'PPpp'
-                            },
-                            title: {
-                                display: true,
-                                text: 'Timestamp'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Value'
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                        },
-                        zoom: {
-                            pan: {
-                                enabled: true,
-                                mode: 'x',
-                            },
-                            zoom: {
-                                wheel: {
-                                    enabled: true
-                                },
-                                pinch: {
-                                    enabled: true
-                                },
-                                mode: 'x',
-                            }
-                        }
-                    }
-                };
-
-                if (historicalChart) {
-                    historicalChart.data = chartData;
-                    historicalChart.update('none'); // Update tanpa animasi agar lebih cepat
-                } else {
-                    historicalChart = new Chart(ctx, {
-                        type: 'line',
-                        data: chartData,
-                        options: chartOptions
-                    });
-                }
-            }
-
-            // Listener untuk event BERAT: Mengganti seluruh data grafik
-            document.addEventListener('chart-data-updated', event => {
-                const chartData = event.detail.chartData;
-                createOrUpdateChart(chartData);
-            });
-
-            // Listener untuk event RINGAN: Menambahkan satu titik data baru
-            document.addEventListener('new-data-point', event => {
-                if (!historicalChart || !historicalChart.data.labels || historicalChart.data.labels
-                    .length === 0) return;
-
-                const newData = event.detail.data;
-                const lastLabel = historicalChart.data.labels[historicalChart.data.labels.length - 1];
-
-                // Hindari duplikasi data
-                if (lastLabel && new Date(newData.timestamp) <= new Date(lastLabel)) {
-                    return;
-                }
-
-                historicalChart.data.labels.push(newData.timestamp);
-                historicalChart.data.datasets.forEach(dataset => {
-                    // Gunakan null jika metrik tidak ada untuk timestamp ini
-                    dataset.data.push(newData.metrics[dataset.label] ?? null);
-                });
-
-                // Batasi jumlah titik data untuk performa
-                const maxDataPoints = 120;
-                if (historicalChart.data.labels.length > maxDataPoints) {
-                    historicalChart.data.labels.shift();
-                    historicalChart.data.datasets.forEach(dataset => dataset.data.shift());
-                }
-
-                historicalChart.update('none');
-            });
-        });
-    </script>
 </body>
 
 </html>

@@ -1,48 +1,37 @@
 <div>
-    {{-- CSS untuk layout grid grafik --}}
-    <style>
-        .charts-grid {
-            display: grid;
-            /* Membuat kolom yang fleksibel, minimal 400px */
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 24px;
-            margin-top: 24px;
-        }
-
-        .chart-card {
-            background-color: var(--bg-white, #ffffff);
-            padding: 16px;
-            border-radius: var(--radius-lg, 0.5rem);
-            border: 1px solid var(--border-color, #e5e7eb);
-            box-shadow: var(--shadow-sm);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .chart-card-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin: 0 0 12px 0;
-            color: var(--text-primary, #111827);
-        }
-
-        .chart-container-wrapper {
-            position: relative;
-            height: 250px;
-            /* Tinggi yang ideal untuk preview */
-            flex-grow: 1;
-        }
-    </style>
-
-    {{-- Elemen ini akan terus melakukan polling untuk data terbaru --}}
     <div wire:poll.5s="getLatestDataPoint">
-        {{-- Indikator loading saat filter diterapkan --}}
+        {{-- Overlay loading untuk data historis --}}
         <div class="loading-overlay" wire:loading wire:target="loadChartData">
             <div class="spinner"></div>
         </div>
 
-        {{-- Filter yang disederhanakan, tanpa pemilih metrik --}}
+        {{-- Icon loading kecil untuk data real-time --}}
+        <div class="realtime-loading-indicator" wire:loading wire:target="getLatestDataPoint"
+            title="Updating real-time data...">
+            <div class="realtime-spinner"></div>
+        </div>
+
+        {{-- Status indicator untuk real-time data --}}
+        <div class="realtime-status" wire:loading.remove wire:target="getLatestDataPoint"
+            title="Real-time data connected">
+            <div class="status-dot-green"></div>
+        </div>
+
+        {{-- Filter Controls --}}
         <div class="filters">
+            <div class="filter-group">
+                <label for="metric-selector">Select Metric:</label>
+                {{-- Dropdown ini dikelola oleh JS, tapi nilainya dikirim ke Livewire --}}
+                <div wire:ignore>
+                    <select id="metric-selector" class="metric-dropdown">
+                        @foreach ($allTags as $tag)
+                            <option value="{{ $tag }}" @if (in_array($tag, $selectedTags)) selected @endif>
+                                {{ ucfirst($tag) }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+            </div>
             <div class="filter-group">
                 <label>Select Interval:</label>
                 <div class="interval-buttons">
@@ -58,146 +47,191 @@
             </div>
             <div class="filter-group">
                 <label for="start-date-livewire">Start Date:</label>
-                <input type="date" id="start-date-livewire" wire:model="startDate">
+                <input type="date" id="start-date-livewire" wire:model.defer="startDate">
             </div>
             <div class="filter-group">
                 <label for="end-date-livewire">End Date:</label>
-                <input type="date" id="end-date-livewire" wire:model="endDate">
+                <input type="date" id="end-date-livewire" wire:model.defer="endDate">
             </div>
             <div class="filter-group">
-                <button wire:click="loadChartData" class="btn-primary">Apply Filter</button>
+                <button wire:click="loadChartData" class="btn-primary">Load Historical Data</button>
             </div>
         </div>
 
-        {{-- Grid untuk menampung semua grafik. `wire:ignore` penting agar Chart.js tidak terganggu oleh Livewire --}}
-        <div class="charts-grid" wire:ignore>
-            {{-- Loop ini hanya untuk membuat placeholder canvas. Chart akan di-render oleh JavaScript. --}}
-            @foreach ($allTags as $metric)
-                <div class="chart-card">
-                    <h3 class="chart-card-title">{{ $metric }}</h3>
-                    <div class="chart-container-wrapper">
-                        {{-- ID canvas dibuat unik berdasarkan nama metrik --}}
-                        <canvas id="chart-{{ \Illuminate\Support\Str::slug($metric) }}"></canvas>
-                    </div>
-                </div>
-            @endforeach
+        {{-- Chart Container --}}
+        <div class="single-chart-container" wire:ignore>
+            <canvas id="singleChart"></canvas>
+            <div
+                style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px; border-radius: 4px; font-size: 12px; pointer-events: none;">
+                <div>Scroll: Zoom | Drag: Pan</div>
+            </div>
         </div>
     </div>
 
-    {{-- Skrip khusus untuk merender banyak grafik --}}
-    <script>
-        // Pastikan Chart.js tersedia
-        if (typeof Chart === 'undefined') {
-            console.error('Chart.js is not loaded!');
-        } else {
-            console.log('Chart.js is loaded successfully');
-        }
+    @script
+        <script>
+            document.addEventListener('livewire:navigated', () => {
+                let singleChartInstance = null;
+                let isLoadingMore = false;
+                const ctx = document.getElementById('singleChart')?.getContext('2d');
+                if (!ctx) return;
 
-        // Objek untuk menyimpan semua instance Chart.js
-        window.chartInstances = {};
+                // KUNCI: Fungsi untuk lazy loading data historis
+                const handleLazyLoad = (chart) => {
+                    if (isLoadingMore || !chart.data.datasets[0].data.length) return;
 
-        // Fungsi untuk membuat atau memperbarui satu grafik
-        window.createOrUpdateChart = function(ctx, chartData, metricName) {
-            const chartOptions = {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false
+                    const currentMin = chart.scales.x.min;
+                    const oldestDataPoint = chart.data.datasets[0].data[0].x;
+
+                    if (currentMin < oldestDataPoint) {
+                        isLoadingMore = true;
+                        const newEndDate = new Date(oldestDataPoint);
+                        const newStartDate = new Date(newEndDate.getTime() - (24 * 60 * 60 * 1000));
+
+                        window.Livewire.dispatch('loadMoreHistoricalData', {
+                            startDate: newStartDate.toISOString().split('T')[0],
+                            endDate: newEndDate.toISOString().split('T')[0]
+                        });
                     }
-                },
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            unit: 'minute',
-                            tooltipFormat: 'PPpp'
+                };
+
+                const createOrUpdateChart = (initialData, metricName) => {
+                    if (singleChartInstance) singleChartInstance.destroy();
+                    isLoadingMore = false;
+
+                    singleChartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            datasets: [{
+                                label: metricName,
+                                data: initialData,
+                                borderColor: '#3b82f6',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                fill: true,
+                                tension: 0.1,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            parsing: false,
+                            plugins: {
+                                legend: {
+                                    display: true,
+                                    position: 'top'
+                                },
+                                tooltip: {
+                                    mode: 'index',
+                                    intersect: false
+                                },
+                                zoom: {
+                                    pan: {
+                                        enabled: true,
+                                        mode: 'x',
+                                        onPanComplete: ({
+                                            chart
+                                        }) => handleLazyLoad(chart)
+                                    },
+                                    zoom: {
+                                        wheel: {
+                                            enabled: true
+                                        },
+                                        pinch: {
+                                            enabled: true
+                                        },
+                                        mode: 'x',
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    type: 'time',
+                                    time: {
+                                        unit: 'minute',
+                                        tooltipFormat: 'PPpp'
+                                    },
+                                    title: {
+                                        display: true,
+                                        text: 'Timestamp'
+                                    }
+                                },
+                                y: {
+                                    title: {
+                                        display: true,
+                                        text: 'Value'
+                                    }
+                                }
+                            },
+                            interaction: {
+                                mode: 'nearest',
+                                axis: 'x',
+                                intersect: false
+                            }
                         }
-                    },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'Value'
-                        }
-                    }
-                },
-                interaction: {
-                    mode: 'nearest',
-                    axis: 'x',
-                    intersect: false
-                }
-            };
-
-            if (window.chartInstances[metricName]) {
-                window.chartInstances[metricName].data = chartData;
-                window.chartInstances[metricName].update('none');
-            } else {
-                window.chartInstances[metricName] = new Chart(ctx, {
-                    type: 'line',
-                    data: chartData,
-                    options: chartOptions
-                });
-            }
-        };
-
-        // Listener untuk event chart-data-updated
-        document.addEventListener('chart-data-updated', function(event) {
-            console.log('chart-data-updated event received');
-            const chartData = event.detail.chartData;
-            console.log('Chart data received:', chartData);
-
-            if (chartData && chartData.datasets && chartData.datasets.length > 0) {
-                chartData.datasets.forEach(function(dataset) {
-                    const metricName = dataset.label;
-                    const slug = metricName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g,
-                        '');
-                    const canvasElement = document.getElementById('chart-' + slug);
-                    const ctx = canvasElement ? canvasElement.getContext('2d') : null;
-
-                    console.log('Looking for canvas: chart-' + slug, canvasElement);
-
-                    if (ctx) {
-                        const singleMetricData = {
-                            labels: chartData.labels,
-                            datasets: [dataset]
-                        };
-                        window.createOrUpdateChart(ctx, singleMetricData, metricName);
-                    }
-                });
-            }
-        });
-
-        // Listener untuk event new-data-point
-        document.addEventListener('new-data-point', function(event) {
-            const newData = event.detail.data;
-            if (!newData || !newData.metrics) return;
-
-            for (const metricName in newData.metrics) {
-                const chart = window.chartInstances[metricName];
-                if (!chart) continue;
-
-                const value = newData.metrics[metricName];
-                const timestamp = newData.timestamp;
-
-                chart.data.labels.push(timestamp);
-                chart.data.datasets.forEach(function(dataset) {
-                    dataset.data.push(value);
-                });
-
-                const maxDataPoints = 120;
-                if (chart.data.labels.length > maxDataPoints) {
-                    chart.data.labels.shift();
-                    chart.data.datasets.forEach(function(dataset) {
-                        dataset.data.shift();
                     });
-                }
+                };
 
-                chart.update('none');
-            }
-        });
-    </script>
+                // Listener untuk data historis awal
+                document.addEventListener('chart-data-updated', event => {
+                    const chartData = event.detail.chartData;
+                    if (chartData && chartData.datasets.length > 0) {
+                        const dataset = chartData.datasets[0];
+                        const formattedData = chartData.labels.map((label, index) => ({
+                            x: new Date(label).getTime(),
+                            y: dataset.data[index]
+                        }));
+                        createOrUpdateChart(formattedData, dataset.label);
+                    }
+                });
+
+                // Listener untuk data historis yang di-lazy load
+                document.addEventListener('historical-data-prepended', event => {
+                    if (singleChartInstance && event.detail.data.labels.length > 0) {
+                        const newPoints = event.detail.data.labels.map((label, index) => ({
+                            x: new Date(label).getTime(),
+                            y: event.detail.data.datasets[0].data[index]
+                        }));
+                        singleChartInstance.data.datasets[0].data.unshift(...newPoints);
+                        singleChartInstance.update('none');
+                    }
+                    isLoadingMore = false;
+                });
+
+                // Listener untuk data real-time baru
+                document.addEventListener('new-data-point', event => {
+                    const newData = event.detail.data;
+                    if (!singleChartInstance || !newData || !newData.metrics) return;
+
+                    const currentMetric = singleChartInstance.data.datasets[0].label;
+                    const newValue = newData.metrics[currentMetric];
+
+                    if (typeof newValue !== 'undefined') {
+                        singleChartInstance.data.datasets[0].data.push({
+                            x: new Date(newData.timestamp).getTime(),
+                            y: newValue
+                        });
+
+                        const lastDataTime = singleChartInstance.data.datasets[0].data[singleChartInstance.data
+                            .datasets[0].data.length - 2]?.x;
+                        if (lastDataTime && singleChartInstance.scales.x.max >= lastDataTime) {
+                            singleChartInstance.update('quiet');
+                        } else {
+                            singleChartInstance.update('none');
+                        }
+                    }
+                });
+
+                // Setup listener untuk dropdown
+                const metricSelector = document.getElementById('metric-selector');
+                metricSelector.addEventListener('change', function() {
+                    // Saat dropdown berubah, kirim event ke Livewire dan muat ulang data
+                    @this.set('selectedTags', [this.value]);
+                    @this.call('loadChartData');
+                });
+
+                // Memuat data awal saat halaman pertama kali dibuka
+                window.Livewire.dispatch('loadChartData');
+            });
+        </script>
+    @endscript
 </div>

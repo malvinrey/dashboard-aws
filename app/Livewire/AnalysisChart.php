@@ -4,7 +4,6 @@ namespace App\Livewire;
 
 use App\Services\ScadaDataService;
 use Livewire\Component;
-use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
 
 #[Layout('components.layouts.app')]
@@ -18,19 +17,33 @@ class AnalysisChart extends Component
 
     public function mount()
     {
+        // Mengambil semua tag yang tersedia dari service
         $this->allTags = app(ScadaDataService::class)->getUniqueTags()->toArray();
-        // Set semua tags sebagai selected karena sekarang menampilkan semua grafik
-        $this->selectedTags = $this->allTags;
+
+        // Menetapkan tag pertama sebagai pilihan default untuk grafik tunggal
+        if (!empty($this->allTags)) {
+            $this->selectedTags = [$this->allTags[0]];
+        }
+
+        // Menginisialisasi tanggal default jika kosong
+        if (!$this->startDate) {
+            $this->startDate = now()->subDay()->toDateString();
+        }
+        if (!$this->endDate) {
+            $this->endDate = now()->toDateString();
+        }
+
+        // Load chart data saat mount
         $this->loadChartData();
     }
 
     public function loadChartData()
     {
-        // Jika tidak ada selected tags, gunakan semua tags
-        $tagsToLoad = empty($this->selectedTags) ? $this->allTags : $this->selectedTags;
+        // Memastikan ada tag yang dipilih sebelum memuat data
+        if (empty($this->selectedTags)) return;
 
         $chartData = app(ScadaDataService::class)->getHistoricalChartData(
-            $tagsToLoad,
+            $this->selectedTags,
             $this->interval,
             $this->startDate,
             $this->endDate
@@ -40,16 +53,28 @@ class AnalysisChart extends Component
 
     public function getLatestDataPoint()
     {
-        // Jika tidak ada selected tags, gunakan semua tags
-        $tagsToCheck = empty($this->selectedTags) ? $this->allTags : $this->selectedTags;
+        if (empty($this->selectedTags)) return;
 
-        if (empty($tagsToCheck)) return;
-
-        $latestData = app(ScadaDataService::class)->getLatestDataForTags($tagsToCheck);
+        $latestData = app(ScadaDataService::class)->getLatestDataForTags($this->selectedTags);
 
         if ($latestData) {
             $this->dispatch('new-data-point', data: $latestData);
         }
+    }
+
+    public function loadMoreHistoricalData($startDate, $endDate)
+    {
+        if (empty($this->selectedTags)) return;
+
+        $chartData = app(ScadaDataService::class)->getHistoricalChartData(
+            $this->selectedTags,
+            $this->interval,
+            $startDate,
+            $endDate
+        );
+
+        // Mengirim event yang berbeda untuk data lazy-loading
+        $this->dispatch('historical-data-prepended', data: $chartData);
     }
 
     public function render()
