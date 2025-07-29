@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Services\ScadaDataService;
 use Livewire\Component;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
 
 #[Layout('components.layouts.app')]
@@ -17,29 +18,26 @@ class AnalysisChart extends Component
 
     public function mount()
     {
-        // Mengambil semua tag yang tersedia dari service
         $this->allTags = app(ScadaDataService::class)->getUniqueTags()->toArray();
 
-        // Menetapkan tag pertama sebagai pilihan default untuk grafik tunggal
         if (!empty($this->allTags)) {
             $this->selectedTags = [$this->allTags[0]];
         }
 
-        // Menginisialisasi tanggal default jika kosong
         if (!$this->startDate) {
             $this->startDate = now()->subDay()->toDateString();
         }
         if (!$this->endDate) {
             $this->endDate = now()->toDateString();
         }
-
-        // Load chart data saat mount
-        $this->loadChartData();
     }
+
+    // Metode updatedInterval() dan updatedSelectedTags() telah dihapus
+    // untuk mencegah render ulang otomatis yang tidak diinginkan.
+    // Pengguna sekarang memiliki kendali penuh melalui tombol "Load".
 
     public function loadChartData()
     {
-        // Memastikan ada tag yang dipilih sebelum memuat data
         if (empty($this->selectedTags)) return;
 
         $chartData = app(ScadaDataService::class)->getHistoricalChartData(
@@ -51,14 +49,24 @@ class AnalysisChart extends Component
         $this->dispatch('chart-data-updated', chartData: $chartData);
     }
 
+    /**
+     * KUNCI PERBAIKAN: Metode ini sekarang lebih cerdas.
+     * Ia mengambil nilai agregat terbaru yang sesuai dengan interval yang dipilih.
+     */
     public function getLatestDataPoint()
     {
         if (empty($this->selectedTags)) return;
 
-        $latestData = app(ScadaDataService::class)->getLatestDataForTags($this->selectedTags);
+        // Memanggil metode service baru yang dirancang untuk mengambil
+        // titik data agregat terbaru berdasarkan interval.
+        $latestAggregatedData = app(ScadaDataService::class)->getLatestAggregatedDataPoint(
+            $this->selectedTags,
+            $this->interval
+        );
 
-        if ($latestData) {
-            $this->dispatch('new-data-point', data: $latestData);
+        if ($latestAggregatedData) {
+            // Mengirim event baru yang lebih spesifik untuk pembaruan cerdas di frontend.
+            $this->dispatch('update-last-point', data: $latestAggregatedData);
         }
     }
 
@@ -73,7 +81,6 @@ class AnalysisChart extends Component
             $endDate
         );
 
-        // Mengirim event yang berbeda untuk data lazy-loading
         $this->dispatch('historical-data-prepended', data: $chartData);
     }
 

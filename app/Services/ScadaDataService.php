@@ -127,8 +127,6 @@ class ScadaDataService
     /**
      * FUNGSI BARU: Mengambil data historis yang sudah diagregasi untuk grafik.
      * (Logika dari HistoricalChart dipindahkan ke sini)
-     */
-    /**
      * PERUBAHAN: Method baru untuk mengambil semua nama_tag yang unik.
      * Logika ini dipindahkan dari komponen Livewire ke sini.
      */
@@ -271,20 +269,107 @@ class ScadaDataService
     }
     public function getLatestDataForTags(array $tags): ?array
     {
-        $latestRecord = ScadaDataTall::orderBy('timestamp_device', 'desc')->first();
-        if (!$latestRecord) return null;
+        try {
+            // Get the latest batch ID first
+            $latestRecord = ScadaDataTall::orderBy('timestamp_device', 'desc')->first();
+            if (!$latestRecord) {
+                Log::warning('No data found in ScadaDataTall table');
+                return null;
+            }
 
-        $latestBatchData = ScadaDataTall::where('batch_id', $latestRecord->batch_id)
-            ->whereIn('nama_tag', $tags)
-            ->get();
+            // Get all data from the latest batch for the requested tags
+            $latestBatchData = ScadaDataTall::where('batch_id', $latestRecord->batch_id)
+                ->whereIn('nama_tag', $tags)
+                ->get();
 
-        if ($latestBatchData->isEmpty()) return null;
+            if ($latestBatchData->isEmpty()) {
+                Log::warning('No data found for requested tags in latest batch', ['tags' => $tags, 'batch_id' => $latestRecord->batch_id]);
+                return null;
+            }
 
-        $dataToDispatch = [
-            'timestamp' => $latestRecord->timestamp_device,
-            'metrics' => $latestBatchData->pluck('nilai_tag', 'nama_tag')->toArray(),
+            // Convert to array format expected by frontend
+            $dataToDispatch = [
+                'timestamp' => $latestRecord->timestamp_device,
+                'metrics' => $latestBatchData->pluck('nilai_tag', 'nama_tag')->toArray(),
+            ];
+
+            Log::info('Latest data fetched successfully', [
+                'batch_id' => $latestRecord->batch_id,
+                'timestamp' => $latestRecord->timestamp_device,
+                'metrics_count' => count($dataToDispatch['metrics']),
+                'available_metrics' => array_keys($dataToDispatch['metrics'])
+            ]);
+
+            return $dataToDispatch;
+        } catch (\Exception $e) {
+            Log::error('Error fetching latest data for tags', [
+                'error' => $e->getMessage(),
+                'tags' => $tags
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Mengambil titik data agregat terbaru berdasarkan interval yang dipilih.
+     * Metode ini dirancang untuk pembaruan real-time yang cerdas.
+     */
+    public function getLatestAggregatedDataPoint(array $tags, string $interval): ?array
+    {
+        if (empty($tags)) return null;
+
+        $appTimezone = config('app.timezone');
+
+        // Tentukan format SQL berdasarkan interval
+        $sqlFormat = '';
+        switch ($interval) {
+            case 'minute':
+                $sqlFormat = '%Y-%m-%d %H:%i:00';
+                break;
+            case 'day':
+                $sqlFormat = '%Y-%m-%d';
+                break;
+            case 'second':
+                $sqlFormat = '%Y-%m-%d %H:%i:%s';
+                break;
+            case 'hour':
+            default:
+                $sqlFormat = '%Y-%m-%d %H:00:00';
+                break;
+        }
+
+        // Ambil data agregat terbaru untuk setiap tag
+        $aggregatedData = [];
+        $latestTimestamp = null;
+
+        foreach ($tags as $tag) {
+            $latestAggregated = ScadaDataTall::select(
+                DB::raw("DATE_FORMAT(timestamp_device, '{$sqlFormat}') as time_group"),
+                DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value'),
+                DB::raw('MAX(timestamp_device) as max_timestamp')
+            )
+                ->where('nama_tag', $tag)
+                ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
+                ->groupBy('time_group')
+                ->orderBy('time_group', 'desc')
+                ->first();
+
+            if ($latestAggregated) {
+                $aggregatedData[$tag] = (float) $latestAggregated->avg_value;
+
+                // Catat timestamp terbaru
+                $currentTimestamp = Carbon::parse($latestAggregated->max_timestamp, $appTimezone);
+                if (!$latestTimestamp || $currentTimestamp->gt($latestTimestamp)) {
+                    $latestTimestamp = $currentTimestamp;
+                }
+            }
+        }
+
+        if (empty($aggregatedData) || !$latestTimestamp) return null;
+
+        return [
+            'timestamp' => $latestTimestamp->toISOString(),
+            'metrics' => $aggregatedData,
         ];
-
-        return $dataToDispatch;
     }
 }

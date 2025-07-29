@@ -24,3 +24,7 @@ Route::get('/log-data', [DashboardController::class, 'logData'])->name('log-data
 use App\Livewire\AnalysisChart;
 
 Route::get('/analysis', AnalysisChart::class);
+
+Route::get('/realtime', function () {
+    return view('views-realtime-chart');
+});

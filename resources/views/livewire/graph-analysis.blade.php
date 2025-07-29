@@ -1,36 +1,18 @@
 <div>
     <div wire:poll.5s="getLatestDataPoint">
-        {{-- Overlay loading untuk data historis --}}
-        <div class="loading-overlay" wire:loading wire:target="loadChartData">
+        <div class="loading-overlay" wire:loading>
             <div class="spinner"></div>
         </div>
 
-        {{-- Icon loading kecil untuk data real-time --}}
-        <div class="realtime-loading-indicator" wire:loading wire:target="getLatestDataPoint"
-            title="Updating real-time data...">
-            <div class="realtime-spinner"></div>
-        </div>
-
-        {{-- Status indicator untuk real-time data --}}
-        <div class="realtime-status" wire:loading.remove wire:target="getLatestDataPoint"
-            title="Real-time data connected">
-            <div class="status-dot-green"></div>
-        </div>
-
-        {{-- Filter Controls --}}
         <div class="filters">
             <div class="filter-group">
                 <label for="metric-selector">Select Metric:</label>
-                {{-- Dropdown ini dikelola oleh JS, tapi nilainya dikirim ke Livewire --}}
-                <div wire:ignore>
-                    <select id="metric-selector" class="metric-dropdown">
-                        @foreach ($allTags as $tag)
-                            <option value="{{ $tag }}" @if (in_array($tag, $selectedTags)) selected @endif>
-                                {{ ucfirst($tag) }}
-                            </option>
-                        @endforeach
-                    </select>
-                </div>
+                {{-- Menggunakan .defer agar tidak memicu request sampai ada aksi lain --}}
+                <select id="metric-selector" class="metric-dropdown" wire:model.defer="selectedTags">
+                    @foreach ($allTags as $tag)
+                        <option value="{{ $tag }}">{{ ucfirst($tag) }}</option>
+                    @endforeach
+                </select>
             </div>
             <div class="filter-group">
                 <label>Select Interval:</label>
@@ -54,11 +36,11 @@
                 <input type="date" id="end-date-livewire" wire:model.defer="endDate">
             </div>
             <div class="filter-group">
+                {{-- Tombol ini sekarang menjadi satu-satunya pemicu untuk render ulang penuh --}}
                 <button wire:click="loadChartData" class="btn-primary">Load Historical Data</button>
             </div>
         </div>
 
-        {{-- Chart Container --}}
         <div class="single-chart-container" wire:ignore>
             <canvas id="singleChart"></canvas>
             <div
@@ -76,18 +58,14 @@
                 const ctx = document.getElementById('singleChart')?.getContext('2d');
                 if (!ctx) return;
 
-                // KUNCI: Fungsi untuk lazy loading data historis
                 const handleLazyLoad = (chart) => {
                     if (isLoadingMore || !chart.data.datasets[0].data.length) return;
-
                     const currentMin = chart.scales.x.min;
                     const oldestDataPoint = chart.data.datasets[0].data[0].x;
-
                     if (currentMin < oldestDataPoint) {
                         isLoadingMore = true;
                         const newEndDate = new Date(oldestDataPoint);
                         const newStartDate = new Date(newEndDate.getTime() - (24 * 60 * 60 * 1000));
-
                         window.Livewire.dispatch('loadMoreHistoricalData', {
                             startDate: newStartDate.toISOString().split('T')[0],
                             endDate: newEndDate.toISOString().split('T')[0]
@@ -98,7 +76,6 @@
                 const createOrUpdateChart = (initialData, metricName) => {
                     if (singleChartInstance) singleChartInstance.destroy();
                     isLoadingMore = false;
-
                     singleChartInstance = new Chart(ctx, {
                         type: 'line',
                         data: {
@@ -108,7 +85,7 @@
                                 borderColor: '#3b82f6',
                                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                                 fill: true,
-                                tension: 0.1,
+                                tension: 0.1
                             }]
                         },
                         options: {
@@ -139,7 +116,7 @@
                                         pinch: {
                                             enabled: true
                                         },
-                                        mode: 'x',
+                                        mode: 'x'
                                     }
                                 }
                             },
@@ -171,7 +148,6 @@
                     });
                 };
 
-                // Listener untuk data historis awal
                 document.addEventListener('chart-data-updated', event => {
                     const chartData = event.detail.chartData;
                     if (chartData && chartData.datasets.length > 0) {
@@ -184,7 +160,6 @@
                     }
                 });
 
-                // Listener untuk data historis yang di-lazy load
                 document.addEventListener('historical-data-prepended', event => {
                     if (singleChartInstance && event.detail.data.labels.length > 0) {
                         const newPoints = event.detail.data.labels.map((label, index) => ({
@@ -197,36 +172,30 @@
                     isLoadingMore = false;
                 });
 
-                // Listener untuk data real-time baru
-                document.addEventListener('new-data-point', event => {
+                // KUNCI PERBAIKAN: Listener baru untuk pembaruan cerdas
+                document.addEventListener('update-last-point', event => {
                     const newData = event.detail.data;
                     if (!singleChartInstance || !newData || !newData.metrics) return;
 
                     const currentMetric = singleChartInstance.data.datasets[0].label;
-                    const newValue = newData.metrics[currentMetric];
+                    const newPointValue = newData.metrics[currentMetric];
+                    if (typeof newPointValue === 'undefined') return;
 
-                    if (typeof newValue !== 'undefined') {
-                        singleChartInstance.data.datasets[0].data.push({
-                            x: new Date(newData.timestamp).getTime(),
-                            y: newValue
+                    const newPointTimestamp = new Date(newData.timestamp).getTime();
+                    const chartData = singleChartInstance.data.datasets[0].data;
+                    const lastPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+
+                    if (lastPoint && lastPoint.x === newPointTimestamp) {
+                        // Jika timestamp sama (masih dalam interval yang sama), perbarui nilainya
+                        lastPoint.y = newPointValue;
+                    } else {
+                        // Jika ini adalah interval baru, tambahkan titik baru
+                        chartData.push({
+                            x: newPointTimestamp,
+                            y: newPointValue
                         });
-
-                        const lastDataTime = singleChartInstance.data.datasets[0].data[singleChartInstance.data
-                            .datasets[0].data.length - 2]?.x;
-                        if (lastDataTime && singleChartInstance.scales.x.max >= lastDataTime) {
-                            singleChartInstance.update('quiet');
-                        } else {
-                            singleChartInstance.update('none');
-                        }
                     }
-                });
-
-                // Setup listener untuk dropdown
-                const metricSelector = document.getElementById('metric-selector');
-                metricSelector.addEventListener('change', function() {
-                    // Saat dropdown berubah, kirim event ke Livewire dan muat ulang data
-                    @this.set('selectedTags', [this.value]);
-                    @this.call('loadChartData');
+                    singleChartInstance.update('quiet');
                 });
 
                 // Memuat data awal saat halaman pertama kali dibuka
