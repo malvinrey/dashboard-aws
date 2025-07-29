@@ -19,13 +19,18 @@ class AnalysisChart extends Component
     public function mount()
     {
         $this->allTags = app(ScadaDataService::class)->getUniqueTags()->toArray();
+        // Set semua tags sebagai selected karena sekarang menampilkan semua grafik
+        $this->selectedTags = $this->allTags;
         $this->loadChartData();
     }
 
     public function loadChartData()
     {
+        // Jika tidak ada selected tags, gunakan semua tags
+        $tagsToLoad = empty($this->selectedTags) ? $this->allTags : $this->selectedTags;
+
         $chartData = app(ScadaDataService::class)->getHistoricalChartData(
-            $this->selectedTags,
+            $tagsToLoad,
             $this->interval,
             $this->startDate,
             $this->endDate
@@ -35,9 +40,12 @@ class AnalysisChart extends Component
 
     public function getLatestDataPoint()
     {
-        if (empty($this->selectedTags)) return;
+        // Jika tidak ada selected tags, gunakan semua tags
+        $tagsToCheck = empty($this->selectedTags) ? $this->allTags : $this->selectedTags;
 
-        $latestData = app(ScadaDataService::class)->getLatestDataForTags($this->selectedTags);
+        if (empty($tagsToCheck)) return;
+
+        $latestData = app(ScadaDataService::class)->getLatestDataForTags($tagsToCheck);
 
         if ($latestData) {
             $this->dispatch('new-data-point', data: $latestData);
