@@ -64,142 +64,116 @@
     @script
         <script>
             document.addEventListener('livewire:navigated', () => {
-                let plotlyChart = null;
                 const chartContainer = document.getElementById('plotlyChart');
                 const warningBox = document.getElementById('chart-warning');
                 const warningMessage = document.getElementById('warning-message');
 
                 if (!chartContainer || !warningBox) return;
 
-                const createOrUpdateChart = (plotlyData, layout) => {
-                    if (plotlyChart) {
-                        Plotly.purge('plotlyChart');
-                    }
-
-                    if (!plotlyData || plotlyData.length === 0) {
-                        console.log('No data to display');
-                        return;
-                    }
-
-                    // Konfigurasi layout default jika tidak ada
-                    const defaultLayout = {
+                // Fungsi untuk membuat chart baru
+                const createChart = (plotlyData, layout) => {
+                    const finalLayout = {
                         title: 'Historical Data Analysis',
                         xaxis: {
                             title: 'Timestamp',
-                            type: 'date',
-                            rangeslider: {
-                                visible: false
-                            }
+                            type: 'date'
                         },
                         yaxis: {
-                            title: 'Value'
+                            title: 'Value',
+                            autorange: true
                         },
                         margin: {
-                            l: 50,
-                            r: 20,
-                            b: 40,
-                            t: 40
+                            l: 60,
+                            r: 30,
+                            b: 50,
+                            t: 50
                         },
-                        paper_bgcolor: '#ffffff',
-                        plot_bgcolor: '#ffffff',
                         hovermode: 'x unified',
                         showlegend: true,
-                        legend: {
-                            x: 0,
-                            y: 1
-                        }
-                    };
-
-                    const finalLayout = {
-                        ...defaultLayout,
                         ...layout
                     };
-
                     Plotly.newPlot('plotlyChart', plotlyData, finalLayout, {
                         responsive: true,
-                        displayModeBar: true,
-                        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
                         displaylogo: false
                     });
-
-                    plotlyChart = document.getElementById('plotlyChart');
                 };
 
+                // Listener untuk data historis awal
+                document.addEventListener('chart-data-updated', event => {
+                    warningBox.style.display = 'none';
+                    const chartData = event.detail.chartData;
+                    if (chartData && chartData.data && chartData.data.length > 0) {
+                        // Konversi string tanggal menjadi objek Date untuk Plotly
+                        const plotlyData = chartData.data.map(trace => ({
+                            ...trace,
+                            x: trace.x.map(dateStr => new Date(dateStr)),
+                            y: trace.y,
+                        }));
+                        createChart(plotlyData, chartData.layout);
+                    }
+                });
+
+                // Listener untuk data historis (lazy loading), tidak berubah
+                document.addEventListener('historical-data-prepended', event => {
+                    // ... (logika ini bisa dibiarkan sama atau disesuaikan jika perlu)
+                });
+
+                // Listener untuk menampilkan peringatan, tidak berubah
                 document.addEventListener('show-warning', event => {
                     warningMessage.textContent = event.detail.message;
                     warningBox.style.display = 'block';
                 });
 
-                document.addEventListener('chart-data-updated', event => {
-                    warningBox.style.display = 'none';
-                    const chartData = event.detail.chartData;
-
-                    if (chartData && chartData.data && chartData.data.length > 0) {
-                        console.log('Plotly data received:', chartData);
-
-                        // Konversi data untuk Plotly.js - menggunakan timestamp asli dari database
-                        const plotlyData = chartData.data.map(trace => ({
-                            ...trace,
-                            x: trace.x.map(dateStr => new Date(dateStr)),
-                            y: trace.y.map(val => val === null ? null : parseFloat(val)),
-                            type: 'scatter',
-                            mode: 'lines+markers',
-                            line: {
-                                width: 2
-                            },
-                            marker: {
-                                size: 4
-                            }
-                        }));
-
-                        createOrUpdateChart(plotlyData, chartData.layout);
-                    } else {
-                        console.log('No chart data or data empty');
-                    }
-                });
-
-                document.addEventListener('historical-data-prepended', event => {
-                    if (plotlyChart && event.detail.data && event.detail.data.data.length > 0) {
-                        const newData = event.detail.data.data[0];
-                        const newX = newData.x.map(dateStr => new Date(dateStr));
-                        const newY = newData.y.map(val => val === null ? null : parseFloat(val));
-
-                        Plotly.extendTraces('plotlyChart', {
-                            x: [newX],
-                            y: [newY]
-                        }, [0]);
-                    }
-                });
-
+                // ===================================================================
+                // KUNCI PERBAIKAN: LOGIKA BARU UNTUK REAL-TIME UPDATE
+                // ===================================================================
                 document.addEventListener('update-last-point', event => {
+                    const plotlyChart = document.getElementById('plotlyChart');
+                    if (!plotlyChart || !plotlyChart.data || plotlyChart.data.length === 0) return;
+
                     const newData = event.detail.data;
-                    if (!plotlyChart || !newData || !newData.metrics || !newData.timestamp) return;
+                    if (!newData || !newData.metrics || !newData.timestamp) return;
 
-                    const currentMetric = newData.metrics;
-                    const newPointValue = Object.values(currentMetric)[0];
-                    if (typeof newPointValue === 'undefined') return;
+                    const newPointValue = Object.values(newData.metrics)[0];
+                    const newPointTimestamp = new Date(newData.timestamp); // Timestamp grup (misal: 11:00:00)
 
-                    // Parse timestamp sebagai string lokal tanpa konversi timezone
-                    const newPointTimestamp = new Date(newData.timestamp);
+                    // Ambil data trace yang ada di grafik
+                    const currentTrace = plotlyChart.data[0];
+                    const lastIndex = currentTrace.x.length - 1;
+                    const lastChartTimestamp = new Date(currentTrace.x[lastIndex]);
 
-                    console.log('Real-time update:', {
-                        originalTimestamp: newData.timestamp,
-                        parsedTimestamp: newPointTimestamp,
-                        value: newPointValue
+                    console.log('Smart real-time update:', {
+                        newTimeGroup: newData.timestamp,
+                        newPointTimestamp: newPointTimestamp,
+                        lastChartTimestamp: lastChartTimestamp,
+                        newValue: newPointValue,
+                        isSameInterval: newPointTimestamp.getTime() === lastChartTimestamp.getTime()
                     });
 
-                    // Update titik terakhir atau tambah titik baru
-                    Plotly.extendTraces('plotlyChart', {
-                        x: [
-                            [newPointTimestamp]
-                        ],
-                        y: [
-                            [newPointValue]
-                        ]
-                    }, [0]);
+                    // Cek apakah timestamp baru sama dengan timestamp titik terakhir di grafik
+                    if (newPointTimestamp.getTime() === lastChartTimestamp.getTime()) {
+                        // --- KASUS 1: UPDATE NILAI TITIK TERAKHIR ---
+                        // Interval waktu masih sama, jadi kita hanya perbarui nilai Y
+                        currentTrace.y[lastIndex] = newPointValue;
+
+                        // Gambar ulang grafik dengan data yang sudah diupdate
+                        Plotly.redraw('plotlyChart');
+
+                    } else if (newPointTimestamp.getTime() > lastChartTimestamp.getTime()) {
+                        // --- KASUS 2: TAMBAHKAN TITIK BARU ---
+                        // Interval waktu telah berganti (misal: dari jam 10 ke jam 11)
+                        Plotly.extendTraces('plotlyChart', {
+                            x: [
+                                [newPointTimestamp]
+                            ],
+                            y: [
+                                [newPointValue]
+                            ]
+                        }, [0]); // [0] berarti update trace pertama
+                    }
                 });
 
-                // Memuat data awal
+                // Memuat data awal saat halaman dibuka
                 window.Livewire.dispatch('loadChartData');
             });
         </script>

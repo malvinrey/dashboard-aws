@@ -328,40 +328,27 @@ class ScadaDataService
     /**
      * Mengambil titik data agregat terbaru berdasarkan interval yang dipilih.
      * Metode ini dirancang untuk pembaruan real-time yang cerdas.
+     * PERUBAHAN: Mengembalikan 'time_group' sebagai timestamp utama.
      */
     public function getLatestAggregatedDataPoint(array $tags, string $interval): ?array
     {
         if (empty($tags)) return null;
 
-        // Menggunakan timestamp device persis seperti di database
+        // Tentukan format SQL berdasarkan interval (logika ini tetap sama)
+        $sqlFormat = match ($interval) {
+            'minute' => '%Y-%m-%d %H:%i:00',
+            'day' => '%Y-%m-%d',
+            'second' => '%Y-%m-%d %H:%i:%s',
+            default => '%Y-%m-%d %H:00:00',
+        };
 
-        // Tentukan format SQL berdasarkan interval
-        $sqlFormat = '';
-        switch ($interval) {
-            case 'minute':
-                $sqlFormat = '%Y-%m-%d %H:%i:00';
-                break;
-            case 'day':
-                $sqlFormat = '%Y-%m-%d';
-                break;
-            case 'second':
-                $sqlFormat = '%Y-%m-%d %H:%i:%s';
-                break;
-            case 'hour':
-            default:
-                $sqlFormat = '%Y-%m-%d %H:00:00';
-                break;
-        }
-
-        // Ambil data agregat terbaru untuk setiap tag
         $aggregatedData = [];
-        $latestTimestamp = null;
+        $latestTimeGroup = null;
 
         foreach ($tags as $tag) {
             $latestAggregated = ScadaDataTall::select(
                 DB::raw("DATE_FORMAT(timestamp_device, '{$sqlFormat}') as time_group"),
-                DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value'),
-                DB::raw('MAX(timestamp_device) as max_timestamp')
+                DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value')
             )
                 ->where('nama_tag', $tag)
                 ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
@@ -371,27 +358,21 @@ class ScadaDataService
 
             if ($latestAggregated) {
                 $aggregatedData[$tag] = (float) $latestAggregated->avg_value;
-
-                // Catat timestamp terbaru menggunakan timestamp device
-                $currentTimestamp = Carbon::parse($latestAggregated->max_timestamp);
-                if (!$latestTimestamp || $currentTimestamp->gt($latestTimestamp)) {
-                    $latestTimestamp = $currentTimestamp;
-                }
+                $latestTimeGroup = $latestAggregated->time_group;
             }
         }
 
-        if (empty($aggregatedData) || !$latestTimestamp) return null;
+        if (empty($aggregatedData) || !$latestTimeGroup) return null;
 
-        $timestamp = $latestTimestamp->format('Y-m-d H:i:s');
-
+        // KUNCI PERUBAHAN: Kirim 'time_group' sebagai timestamp.
+        // Ini memastikan frontend tahu ember waktu mana yang sedang diupdate.
         Log::info('Latest aggregated data point', [
-            'timestamp' => $timestamp,
-            'original_timestamp' => $latestTimestamp->toDateTimeString(),
+            'time_group' => $latestTimeGroup,
             'metrics' => $aggregatedData
         ]);
 
         return [
-            'timestamp' => $timestamp,
+            'timestamp' => $latestTimeGroup,
             'metrics' => $aggregatedData,
         ];
     }
