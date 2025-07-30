@@ -153,6 +153,33 @@ class ScadaDataService
         return ScadaDataTall::count();
     }
 
+    /**
+     * Mengambil semua data mentah (bukan agregasi) untuk tag tertentu
+     * sejak timestamp terakhir yang diketahui.
+     * Metode ini digunakan untuk "catch-up" data yang terlewat.
+     */
+    public function getRecentDataSince(array $tags, string $lastKnownTimestamp): array
+    {
+        if (empty($tags)) return [];
+
+        $data = ScadaDataTall::select('timestamp_device', 'nama_tag', 'nilai_tag')
+            ->whereIn('nama_tag', $tags)
+            ->where('timestamp_device', '>', $lastKnownTimestamp)
+            ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
+            ->orderBy('timestamp_device', 'asc')
+            ->get();
+
+        // Mengelompokkan hasil berdasarkan nama_tag
+        return $data->groupBy('nama_tag')->map(function ($items) {
+            return $items->map(function ($item) {
+                return [
+                    'timestamp' => $item->timestamp_device->format('Y-m-d H:i:s'),
+                    'value' => (float) $item->nilai_tag,
+                ];
+            });
+        })->toArray();
+    }
+
     public function getHistoricalChartData(array $tags, string $interval, ?string $startDateTime = null, ?string $endDateTime = null): array
     {
         if (empty($tags)) {
@@ -161,12 +188,28 @@ class ScadaDataService
             return ['data' => [], 'layout' => []];
         }
 
-        // Menggunakan timestamp device persis seperti di database
+        // ===================================================================
+        // KUNCI PERBAIKAN: Logika penentuan rentang waktu yang lebih cerdas
+        // ===================================================================
         $start = null;
         $end = null;
 
-        // 1. Logika penentuan rentang waktu (start & end) menggunakan timestamp device
-        if (!$startDateTime && !$endDateTime) {
+        if ($startDateTime && $endDateTime) {
+            // Jika intervalnya besar (jam/hari), bulatkan ke rentang hari penuh.
+            if (in_array($interval, ['hour', 'day'])) {
+                $start = Carbon::parse($startDateTime)->startOfDay();
+                $end = Carbon::parse($endDateTime)->endOfDay();
+            } elseif ($interval === 'minute') {
+                // Untuk interval menit, gunakan rentang hari penuh dari tanggal yang diberikan
+                $start = Carbon::parse($startDateTime)->startOfDay();
+                $end = Carbon::parse($endDateTime)->endOfDay();
+            } else {
+                // Hanya untuk interval second, gunakan waktu presisi yang diberikan.
+                $start = Carbon::parse($startDateTime);
+                $end = Carbon::parse($endDateTime);
+            }
+        } else {
+            // Logika fallback jika tidak ada tanggal yang disediakan
             $minTimestamp = ScadaDataTall::whereIn('nama_tag', $tags)->min('timestamp_device');
             $maxTimestamp = ScadaDataTall::whereIn('nama_tag', $tags)->max('timestamp_device');
 
@@ -175,15 +218,30 @@ class ScadaDataService
             }
             $start = Carbon::parse($minTimestamp)->startOfDay();
             $end = Carbon::parse($maxTimestamp)->endOfDay();
-        } else {
-            if ($interval === 'second') {
-                $end = $endDateTime ? Carbon::parse($endDateTime) : Carbon::now();
-                $start = $startDateTime ? Carbon::parse($startDateTime) : $end->copy()->subHour();
-            } else {
-                $end = $endDateTime ? Carbon::parse($endDateTime)->endOfDay() : Carbon::now();
-                $start = $startDateTime ? Carbon::parse($startDateTime)->startOfDay() : $end->copy()->subDay();
-            }
         }
+
+        // Pastikan start < end untuk menghindari range negatif
+        if ($start->gte($end)) {
+            Log::warning('Invalid time range detected in service, swapping start and end', [
+                'original_start' => $start->toDateTimeString(),
+                'original_end' => $end->toDateTimeString()
+            ]);
+            // Swap start dan end jika start >= end
+            $temp = $start;
+            $start = $end;
+            $end = $temp;
+        }
+
+        // Debug log untuk time range calculation
+        Log::info('Smart time range calculation', [
+            'interval' => $interval,
+            'input_startDateTime' => $startDateTime,
+            'input_endDateTime' => $endDateTime,
+            'calculated_start' => $start->toDateTimeString(),
+            'calculated_end' => $end->toDateTimeString(),
+            'time_range_seconds' => $end->diffInSeconds($start),
+            'is_precise_range' => in_array($interval, ['minute', 'second'])
+        ]);
 
         // 2. Logika format SQL dan interval CarbonPeriod tetap sama.
         $sqlFormat = '';
@@ -201,12 +259,7 @@ class ScadaDataService
                 $carbonIntervalSpec = '1 day';
                 break;
             case 'second':
-                $sqlFormat = '%Y-%m-%d %H:%i:%s';
-                $phpDateFormat = 'Y-m-d H:i:s';
-                $carbonIntervalSpec = '1 second';
-                if ($end->diffInSeconds($start) > 300) {
-                    $start = $end->copy()->subSeconds(300);
-                }
+                $sqlFormat = '';
                 break;
             case 'hour':
             default:
@@ -222,19 +275,79 @@ class ScadaDataService
 
         // 4. Loop untuk setiap tag untuk membuat "trace" Plotly
         foreach ($tags as $key => $tag) {
-            $existingData = ScadaDataTall::select(
-                DB::raw("DATE_FORMAT(timestamp_device, '{$sqlFormat}') as time_group"),
-                DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value')
-            )->where('nama_tag', $tag)
-                ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
-                ->whereBetween('timestamp_device', [$start, $end])
-                ->groupBy('time_group')
-                ->orderBy('time_group', 'asc')
-                ->get();
+            if ($interval === 'second') {
+                // ===================================================================
+                // KODE BARU YANG LEBIH CERDAS UNTUK INTERVAL DETIK
+                // ===================================================================
 
-            // Hanya gunakan data yang benar-benar ada
-            $labels = $existingData->pluck('time_group')->toArray();
-            $values = $existingData->pluck('avg_value')->map(fn($val) => (float) $val)->toArray();
+                // 1. Ambil HANYA data mentah yang benar-benar ada di database
+                $rawData = ScadaDataTall::select('timestamp_device', 'nilai_tag')
+                    ->where('nama_tag', $tag)
+                    ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
+                    ->whereBetween('timestamp_device', [$start, $end])
+                    ->orderBy('timestamp_device', 'asc')
+                    ->get();
+
+                if ($rawData->isEmpty()) {
+                    continue; // Lanjut ke tag berikutnya jika tidak ada data sama sekali
+                }
+
+                // 2. Siapkan array hasil dan proses data untuk menyisipkan jeda (null)
+                $labels = [];
+                $values = [];
+                $lastTimestamp = null;
+                // Tentukan batas jeda dalam detik. Jika lebih dari ini, garis akan terputus.
+                $gapThresholdInSeconds = 30;
+
+                foreach ($rawData as $item) {
+                    $currentTimestamp = $item->timestamp_device;
+
+                    // Jika ini bukan data pertama dan jedanya signifikan
+                    if ($lastTimestamp && $currentTimestamp->diffInSeconds($lastTimestamp) > $gapThresholdInSeconds) {
+                        // Sisipkan titik "jeda" dengan nilai null
+                        $labels[] = $currentTimestamp->copy()->subSecond()->format('Y-m-d H:i:s');
+                        $values[] = null;
+                    }
+
+                    // Tambahkan titik data yang sebenarnya
+                    $labels[] = $currentTimestamp->format('Y-m-d H:i:s');
+                    $values[] = (float) $item->nilai_tag;
+
+                    // Update timestamp terakhir
+                    $lastTimestamp = $currentTimestamp;
+                }
+            } else {
+                // ===================================================================
+                // KODE BARU UNTUK MENYISIPKAN NULL
+                // ===================================================================
+
+                // 1. Ambil data yang ada dari database, kelompokkan berdasarkan waktu
+                $aggregatedData = ScadaDataTall::select(
+                    DB::raw("DATE_FORMAT(timestamp_device, '{$sqlFormat}') as time_group"),
+                    DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value')
+                )->where('nama_tag', $tag)
+                    ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
+                    ->whereBetween('timestamp_device', [$start, $end])
+                    ->groupBy('time_group')
+                    ->orderBy('time_group', 'asc')
+                    ->get()
+                    ->keyBy('time_group'); // Gunakan keyBy untuk pencarian cepat
+
+                // 2. Buat rentang waktu lengkap dari awal hingga akhir
+                $period = CarbonPeriod::create($start, $carbonIntervalSpec, $end);
+
+                // Inisialisasi array kosong untuk hasil akhir
+                $labels = [];
+                $values = [];
+
+                // 3. Loop melalui setiap "slot" waktu, isi dengan data atau null
+                foreach ($period as $date) {
+                    $formattedDate = $date->format($phpDateFormat);
+                    $labels[] = $formattedDate;
+                    // Jika data untuk waktu ini ada, gunakan nilainya. Jika tidak, masukkan null.
+                    $values[] = $aggregatedData->get($formattedDate)?->avg_value ?? null;
+                }
+            }
 
             if (empty($labels)) {
                 continue; // Skip jika tidak ada data untuk tag ini
@@ -242,22 +355,21 @@ class ScadaDataService
 
             $borderColor = $colorPalette[$key % count($colorPalette)];
 
-            // Buat struktur "trace" yang dimengerti Plotly.js
+            // Tambahkan 'connectgaps: false' untuk memastikan grafik terputus
             $plotlyTraces[] = [
                 'x' => $labels,
                 'y' => $values,
                 'type' => 'scatter',
-                'mode' => 'lines+markers',
-                'name' => $tag, // Nama metrik
+                'mode' => 'lines', // Ganti ke 'lines' agar lebih jelas terlihat jedanya
+                'name' => $tag,
                 'line' => ['color' => $borderColor, 'width' => 2],
-                'marker' => ['size' => 4],
-                'hovertemplate' => '<b>%{x}</b><br>Value: %{y}<extra></extra>' // Custom tooltip
+                'connectgaps' => false, // <-- TAMBAHAN PENTING
+                'hovertemplate' => '<b>%{x}</b><br>Value: %{y}<extra></extra>'
             ];
         }
 
         // 5. Buat object layout untuk styling grafik
         $layout = [
-            'title' => 'Historical Data Analysis',
             'xaxis' => ['title' => 'Timestamp'],
             'yaxis' => ['title' => 'Value'],
             'margin' => ['l' => 50, 'r' => 20, 'b' => 40, 't' => 40],
@@ -273,7 +385,8 @@ class ScadaDataService
             'start' => $start->toDateTimeString(),
             'end' => $end->toDateTimeString(),
             'traces_count' => count($plotlyTraces),
-            'sample_trace' => $plotlyTraces[0] ?? null
+            'sample_trace' => $plotlyTraces[0] ?? null,
+            'is_second_interval' => $interval === 'second'
         ]);
 
         return [
@@ -334,31 +447,47 @@ class ScadaDataService
     {
         if (empty($tags)) return null;
 
-        // Tentukan format SQL berdasarkan interval (logika ini tetap sama)
-        $sqlFormat = match ($interval) {
-            'minute' => '%Y-%m-%d %H:%i:00',
-            'day' => '%Y-%m-%d',
-            'second' => '%Y-%m-%d %H:%i:%s',
-            default => '%Y-%m-%d %H:00:00',
-        };
-
         $aggregatedData = [];
         $latestTimeGroup = null;
 
         foreach ($tags as $tag) {
-            $latestAggregated = ScadaDataTall::select(
-                DB::raw("DATE_FORMAT(timestamp_device, '{$sqlFormat}') as time_group"),
-                DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value')
-            )
-                ->where('nama_tag', $tag)
-                ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
-                ->groupBy('time_group')
-                ->orderBy('time_group', 'desc')
-                ->first();
+            if ($interval === 'second') {
+                // Untuk interval second, ambil data terbaru tanpa grouping
+                $latestData = ScadaDataTall::select(
+                    'timestamp_device',
+                    'nilai_tag'
+                )
+                    ->where('nama_tag', $tag)
+                    ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
+                    ->orderBy('timestamp_device', 'desc')
+                    ->first();
 
-            if ($latestAggregated) {
-                $aggregatedData[$tag] = (float) $latestAggregated->avg_value;
-                $latestTimeGroup = $latestAggregated->time_group;
+                if ($latestData) {
+                    $aggregatedData[$tag] = (float) $latestData->nilai_tag;
+                    $latestTimeGroup = $latestData->timestamp_device->format('Y-m-d H:i:s');
+                }
+            } else {
+                // Untuk interval lain, gunakan grouping seperti biasa
+                $sqlFormat = match ($interval) {
+                    'minute' => '%Y-%m-%d %H:%i:00',
+                    'day' => '%Y-%m-%d',
+                    default => '%Y-%m-%d %H:00:00',
+                };
+
+                $latestAggregated = ScadaDataTall::select(
+                    DB::raw("DATE_FORMAT(timestamp_device, '{$sqlFormat}') as time_group"),
+                    DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value')
+                )
+                    ->where('nama_tag', $tag)
+                    ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
+                    ->groupBy('time_group')
+                    ->orderBy('time_group', 'desc')
+                    ->first();
+
+                if ($latestAggregated) {
+                    $aggregatedData[$tag] = (float) $latestAggregated->avg_value;
+                    $latestTimeGroup = $latestAggregated->time_group;
+                }
             }
         }
 
@@ -368,7 +497,8 @@ class ScadaDataService
         // Ini memastikan frontend tahu ember waktu mana yang sedang diupdate.
         Log::info('Latest aggregated data point', [
             'time_group' => $latestTimeGroup,
-            'metrics' => $aggregatedData
+            'metrics' => $aggregatedData,
+            'interval' => $interval
         ]);
 
         return [

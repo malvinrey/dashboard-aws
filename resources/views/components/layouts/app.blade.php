@@ -204,10 +204,87 @@
             background-color: var(--primary-hover-color);
         }
 
-        /* Gaya khusus untuk dropdown metric */
-        .metric-dropdown {
-            min-width: 200px;
+        .btn-secondary {
+            background-color: var(--bg-white);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
             cursor: pointer;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-sm);
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--bg-light);
+            border-color: var(--primary-color);
+        }
+
+        .metrics-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* Gaya khusus untuk checkbox metrics */
+        .metrics-checkbox-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            max-width: 600px;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background-color: var(--bg-white);
+        }
+
+        .metric-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: var(--radius-md);
+            background-color: var(--bg-light);
+            border: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+
+        .metric-checkbox:hover {
+            background-color: #e5f3ff;
+            border-color: var(--primary-color);
+        }
+
+        .metric-checkbox-input {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--primary-color);
+            cursor: pointer;
+        }
+
+        .metric-checkbox-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .metric-checkbox-input:checked+.metric-checkbox-label {
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        .metric-checkbox-input:checked~.metric-checkbox {
+            background-color: #e5f3ff;
+            border-color: var(--primary-color);
         }
 
         .loading-overlay {
@@ -386,6 +463,7 @@
 
     {{-- Cukup muat library Plotly.js versi terbaru. --}}
     <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     {{-- Livewire Scripts --}}
     @livewireScripts
