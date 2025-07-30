@@ -156,38 +156,39 @@ class ScadaDataService
     public function getHistoricalChartData(array $tags, string $interval, ?string $startDateTime = null, ?string $endDateTime = null): array
     {
         if (empty($tags)) {
-            return ['labels' => [], 'datasets' => []];
+            Log::warning('No tags provided for historical chart data');
+            // KEMBALIKAN STRUKTUR PLOTLY
+            return ['data' => [], 'layout' => []];
         }
 
-        $appTimezone = config('app.timezone');
+        // Menggunakan timestamp device persis seperti di database
         $start = null;
         $end = null;
 
-        // 1. Tentukan rentang waktu. Gunakan 24 jam terakhir jika tidak ditentukan.
+        // 1. Logika penentuan rentang waktu (start & end) menggunakan timestamp device
         if (!$startDateTime && !$endDateTime) {
-            // KASUS 1: Tidak ada filter tanggal, cari rentang data keseluruhan.
             $minTimestamp = ScadaDataTall::whereIn('nama_tag', $tags)->min('timestamp_device');
             $maxTimestamp = ScadaDataTall::whereIn('nama_tag', $tags)->max('timestamp_device');
 
-            // Jika tidak ada data sama sekali untuk tag ini, kembalikan array kosong.
             if (!$minTimestamp || !$maxTimestamp) {
-                return ['labels' => [], 'datasets' => []];
+                return ['data' => [], 'layout' => []];
             }
-
-            $start = Carbon::parse($minTimestamp, $appTimezone)->startOfDay();
-            $end = Carbon::parse($maxTimestamp, $appTimezone)->endOfDay();
+            $start = Carbon::parse($minTimestamp)->startOfDay();
+            $end = Carbon::parse($maxTimestamp)->endOfDay();
         } else {
-            // KASUS 2: Filter tanggal diterapkan, gunakan logika yang ada.
-            // Memberikan fallback default jika hanya salah satu tanggal yang diisi.
-            $end = $endDateTime ? Carbon::parse($endDateTime, $appTimezone)->endOfDay() : Carbon::now($appTimezone);
-            $start = $startDateTime ? Carbon::parse($startDateTime, $appTimezone)->startOfDay() : $end->copy()->subDay();
+            if ($interval === 'second') {
+                $end = $endDateTime ? Carbon::parse($endDateTime) : Carbon::now();
+                $start = $startDateTime ? Carbon::parse($startDateTime) : $end->copy()->subHour();
+            } else {
+                $end = $endDateTime ? Carbon::parse($endDateTime)->endOfDay() : Carbon::now();
+                $start = $startDateTime ? Carbon::parse($startDateTime)->startOfDay() : $end->copy()->subDay();
+            }
         }
 
-        // 2. Tentukan format untuk SQL dan interval untuk CarbonPeriod
+        // 2. Logika format SQL dan interval CarbonPeriod tetap sama.
         $sqlFormat = '';
         $carbonIntervalSpec = '';
         $phpDateFormat = '';
-
         switch ($interval) {
             case 'minute':
                 $sqlFormat = '%Y-%m-%d %H:%i:00';
@@ -203,6 +204,9 @@ class ScadaDataService
                 $sqlFormat = '%Y-%m-%d %H:%i:%s';
                 $phpDateFormat = 'Y-m-d H:i:s';
                 $carbonIntervalSpec = '1 second';
+                if ($end->diffInSeconds($start) > 300) {
+                    $start = $end->copy()->subSeconds(300);
+                }
                 break;
             case 'hour':
             default:
@@ -212,61 +216,72 @@ class ScadaDataService
                 break;
         }
 
-        // 3. Buat rangkaian waktu yang LENGKAP dari awal hingga akhir
-        $period = CarbonPeriod::create($start, $carbonIntervalSpec, $end);
-
-        $labels = [];
-        foreach ($period as $date) {
-            // Format tanggal agar cocok dengan kunci dari $existingData
-            $formattedDate = $date->format($phpDateFormat);
-            $labels[] = $formattedDate;
-        }
-
-        // Siapkan array untuk menampung semua dataset
-        $datasets = [];
-        // Definisikan palet warna untuk setiap garis grafik
+        // PERUBAHAN UTAMA DIMULAI DI SINI
+        $plotlyTraces = [];
         $colorPalette = ['#007bff', '#dc3545', '#ffc107', '#28a745', '#6f42c1', '#fd7e14'];
 
-        // 4. Loop untuk setiap tag yang dipilih
+        // 4. Loop untuk setiap tag untuk membuat "trace" Plotly
         foreach ($tags as $key => $tag) {
             $existingData = ScadaDataTall::select(
                 DB::raw("DATE_FORMAT(timestamp_device, '{$sqlFormat}') as time_group"),
                 DB::raw('AVG(CAST(nilai_tag AS DECIMAL(10,2))) as avg_value')
             )->where('nama_tag', $tag)
                 ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
-                ->whereBetween('timestamp_device', [$start, $end]) // Filter berdasarkan rentang waktu yang sudah ditentukan
+                ->whereBetween('timestamp_device', [$start, $end])
                 ->groupBy('time_group')
                 ->orderBy('time_group', 'asc')
-                ->get()
-                ->keyBy('time_group'); // Kunci array dengan time_group agar mudah dicari
+                ->get();
 
-            $values = [];
-            foreach ($labels as $label) {
-                if (isset($existingData[$label])) {
-                    $values[] = (float) $existingData[$label]->avg_value;
-                } else {
-                    $values[] = null;
-                }
+            // Hanya gunakan data yang benar-benar ada
+            $labels = $existingData->pluck('time_group')->toArray();
+            $values = $existingData->pluck('avg_value')->map(fn($val) => (float) $val)->toArray();
+
+            if (empty($labels)) {
+                continue; // Skip jika tidak ada data untuk tag ini
             }
 
-            // Tentukan warna untuk dataset ini, berputar jika tag lebih banyak dari warna
             $borderColor = $colorPalette[$key % count($colorPalette)];
 
-            // Buat struktur dataset yang dimengerti Chart.js
-            $datasets[] = [
-                'label' => $tag,
-                'data' => $values,
-                'borderColor' => $borderColor,
-                'backgroundColor' => $borderColor . '1A', // Tambahkan transparansi untuk area fill
-                'fill' => true,
-                'tension' => 0.1,
+            // Buat struktur "trace" yang dimengerti Plotly.js
+            $plotlyTraces[] = [
+                'x' => $labels,
+                'y' => $values,
+                'type' => 'scatter',
+                'mode' => 'lines+markers',
+                'name' => $tag, // Nama metrik
+                'line' => ['color' => $borderColor, 'width' => 2],
+                'marker' => ['size' => 4],
+                'hovertemplate' => '<b>%{x}</b><br>Value: %{y}<extra></extra>' // Custom tooltip
             ];
         }
+
+        // 5. Buat object layout untuk styling grafik
+        $layout = [
+            'title' => 'Historical Data Analysis',
+            'xaxis' => ['title' => 'Timestamp'],
+            'yaxis' => ['title' => 'Value'],
+            'margin' => ['l' => 50, 'r' => 20, 'b' => 40, 't' => 40],
+            'paper_bgcolor' => '#ffffff',
+            'plot_bgcolor' => '#ffffff',
+            'hovermode' => 'x unified'
+        ];
+
+        // Log untuk debugging
+        Log::info('Historical chart data generated', [
+            'tags' => $tags,
+            'interval' => $interval,
+            'start' => $start->toDateTimeString(),
+            'end' => $end->toDateTimeString(),
+            'traces_count' => count($plotlyTraces),
+            'sample_trace' => $plotlyTraces[0] ?? null
+        ]);
+
         return [
-            'labels' => $labels,
-            'datasets' => $datasets,
+            'data' => $plotlyTraces,
+            'layout' => $layout,
         ];
     }
+
     public function getLatestDataForTags(array $tags): ?array
     {
         try {
@@ -318,7 +333,7 @@ class ScadaDataService
     {
         if (empty($tags)) return null;
 
-        $appTimezone = config('app.timezone');
+        // Menggunakan timestamp device persis seperti di database
 
         // Tentukan format SQL berdasarkan interval
         $sqlFormat = '';
@@ -357,8 +372,8 @@ class ScadaDataService
             if ($latestAggregated) {
                 $aggregatedData[$tag] = (float) $latestAggregated->avg_value;
 
-                // Catat timestamp terbaru
-                $currentTimestamp = Carbon::parse($latestAggregated->max_timestamp, $appTimezone);
+                // Catat timestamp terbaru menggunakan timestamp device
+                $currentTimestamp = Carbon::parse($latestAggregated->max_timestamp);
                 if (!$latestTimestamp || $currentTimestamp->gt($latestTimestamp)) {
                     $latestTimestamp = $currentTimestamp;
                 }
@@ -367,8 +382,16 @@ class ScadaDataService
 
         if (empty($aggregatedData) || !$latestTimestamp) return null;
 
+        $timestamp = $latestTimestamp->format('Y-m-d H:i:s');
+
+        Log::info('Latest aggregated data point', [
+            'timestamp' => $timestamp,
+            'original_timestamp' => $latestTimestamp->toDateTimeString(),
+            'metrics' => $aggregatedData
+        ]);
+
         return [
-            'timestamp' => $latestTimestamp->toISOString(),
+            'timestamp' => $timestamp,
             'metrics' => $aggregatedData,
         ];
     }

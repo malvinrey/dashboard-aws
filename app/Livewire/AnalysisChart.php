@@ -6,6 +6,7 @@ use App\Services\ScadaDataService;
 use Livewire\Component;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
+use Illuminate\Support\Carbon;
 
 #[Layout('components.layouts.app')]
 class AnalysisChart extends Component
@@ -15,6 +16,7 @@ class AnalysisChart extends Component
     public string $interval = 'hour';
     public ?string $startDate = null;
     public ?string $endDate = null;
+    // Properti startTime dan endTime telah dihapus untuk menyederhanakan UI
 
     public function mount()
     {
@@ -24,21 +26,36 @@ class AnalysisChart extends Component
             $this->selectedTags = [$this->allTags[0]];
         }
 
-        if (!$this->startDate) {
-            $this->startDate = now()->subDay()->toDateString();
-        }
-        if (!$this->endDate) {
-            $this->endDate = now()->toDateString();
-        }
+        $this->startDate = now()->subDay()->toDateString();
+        $this->endDate = now()->toDateString();
     }
-
-    // Metode updatedInterval() dan updatedSelectedTags() telah dihapus
-    // untuk mencegah render ulang otomatis yang tidak diinginkan.
-    // Pengguna sekarang memiliki kendali penuh melalui tombol "Load".
 
     public function loadChartData()
     {
-        if (empty($this->selectedTags)) return;
+        Log::info('loadChartData called', [
+            'selectedTags' => $this->selectedTags,
+            'interval' => $this->interval,
+            'startDate' => $this->startDate,
+            'endDate' => $this->endDate
+        ]);
+
+        if (empty($this->selectedTags)) {
+            Log::warning('No tags selected');
+            return;
+        }
+
+        // KUNCI PERBAIKAN: Validasi rentang waktu sebelum menjalankan query
+        if ($this->interval === 'second') {
+            $start = Carbon::parse($this->startDate);
+            $end = Carbon::parse($this->endDate);
+
+            // Jika rentang lebih dari 1 jam (3600 detik), kirim peringatan dan hentikan.
+            // Anda bisa menyesuaikan batas ini sesuai kebutuhan.
+            if ($end->diffInSeconds($start) > 3600) {
+                $this->dispatch('show-warning', message: 'Rentang waktu terlalu besar untuk interval per detik. Harap pilih rentang di bawah 1 jam.');
+                return; // Hentikan eksekusi
+            }
+        }
 
         $chartData = app(ScadaDataService::class)->getHistoricalChartData(
             $this->selectedTags,
@@ -46,26 +63,25 @@ class AnalysisChart extends Component
             $this->startDate,
             $this->endDate
         );
+
+        Log::info('Chart data loaded', [
+            'data_count' => count($chartData['data'] ?? []),
+            'layout' => $chartData['layout'] ?? null
+        ]);
+
         $this->dispatch('chart-data-updated', chartData: $chartData);
     }
 
-    /**
-     * KUNCI PERBAIKAN: Metode ini sekarang lebih cerdas.
-     * Ia mengambil nilai agregat terbaru yang sesuai dengan interval yang dipilih.
-     */
     public function getLatestDataPoint()
     {
         if (empty($this->selectedTags)) return;
 
-        // Memanggil metode service baru yang dirancang untuk mengambil
-        // titik data agregat terbaru berdasarkan interval.
         $latestAggregatedData = app(ScadaDataService::class)->getLatestAggregatedDataPoint(
             $this->selectedTags,
             $this->interval
         );
 
         if ($latestAggregatedData) {
-            // Mengirim event baru yang lebih spesifik untuk pembaruan cerdas di frontend.
             $this->dispatch('update-last-point', data: $latestAggregatedData);
         }
     }

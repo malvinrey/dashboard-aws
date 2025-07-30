@@ -200,7 +200,7 @@
                         <div class="info-row">
                             <span class="info-label">Timestamp:</span>
                             <span
-                                class="info-value">{{ \Carbon\Carbon::parse($lastPayloadInfo->timestamp_device)->format('Y-m-d H:i:s') }}</span>
+                                class="info-value">{{ \Carbon\Carbon::parse($lastPayloadInfo->timestamp_device)->format('d M Y, H:i:s') }}</span>
                         </div>
                         <div class="info-row">
                             <span class="info-label">Batch ID:</span>

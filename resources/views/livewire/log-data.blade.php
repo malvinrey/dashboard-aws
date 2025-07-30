@@ -27,7 +27,7 @@
 
                 <tr wire:key="{{ $log->id }}">
                     <td>{{ $log->id }}</td>
-                    <td>{{ $log->timestamp_device }}</td>
+                    <td>{{ $log->timestamp_device->format('d M Y, H:i:s') }}</td>
                     <td>{{ $log->nama_group }}</td>
                     <td>{{ $log->nama_tag }}</td>
                     <td>{{ $log->nilai_tag }}</td>

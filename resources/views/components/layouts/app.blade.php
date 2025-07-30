@@ -384,12 +384,8 @@
         </div>
     </div>
 
-    {{-- KUNCI: Hammer.js HARUS dimuat SEBELUM Chart.js untuk dukungan gestur mobile --}}
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js">
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom/dist/chartjs-plugin-zoom.min.js"></script>
+    {{-- Cukup muat library Plotly.js versi terbaru. --}}
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 
     {{-- Livewire Scripts --}}
     @livewireScripts

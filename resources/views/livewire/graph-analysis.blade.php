@@ -1,14 +1,20 @@
 <div>
+    {{-- KUNCI PERBAIKAN: Indikator loading real-time yang tidak mengganggu --}}
+    <div class="realtime-status" wire:loading.class="loading" wire:target="getLatestDataPoint"
+        title="Fetching latest data...">
+        <div class="status-dot-green"></div>
+    </div>
+
     <div wire:poll.5s="getLatestDataPoint">
-        <div class="loading-overlay" wire:loading>
+        {{-- Overlay loading ini HANYA akan aktif untuk aksi berat seperti loadChartData --}}
+        <div class="loading-overlay" wire:loading.flex wire:target="loadChartData, loadMoreHistoricalData">
             <div class="spinner"></div>
         </div>
 
         <div class="filters">
             <div class="filter-group">
                 <label for="metric-selector">Select Metric:</label>
-                {{-- Menggunakan .defer agar tidak memicu request sampai ada aksi lain --}}
-                <select id="metric-selector" class="metric-dropdown" wire:model.defer="selectedTags">
+                <select id="metric-selector" class="metric-dropdown" wire:model.defer="selectedTags.0">
                     @foreach ($allTags as $tag)
                         <option value="{{ $tag }}">{{ ucfirst($tag) }}</option>
                     @endforeach
@@ -35,14 +41,19 @@
                 <label for="end-date-livewire">End Date:</label>
                 <input type="date" id="end-date-livewire" wire:model.defer="endDate">
             </div>
+            {{-- Input waktu kondisional telah dihapus --}}
             <div class="filter-group">
-                {{-- Tombol ini sekarang menjadi satu-satunya pemicu untuk render ulang penuh --}}
                 <button wire:click="loadChartData" class="btn-primary">Load Historical Data</button>
             </div>
         </div>
 
+        <div id="chart-warning"
+            style="display: none; padding: 12px; margin-bottom: 16px; border-radius: 0.375rem; background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404;">
+            <strong id="warning-message"></strong>
+        </div>
+
         <div class="single-chart-container" wire:ignore>
-            <canvas id="singleChart"></canvas>
+            <div id="plotlyChart" style="width: 100%; height: 100%;"></div>
             <div
                 style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px; border-radius: 4px; font-size: 12px; pointer-events: none;">
                 <div>Scroll: Zoom | Drag: Pan</div>
@@ -53,152 +64,142 @@
     @script
         <script>
             document.addEventListener('livewire:navigated', () => {
-                let singleChartInstance = null;
-                let isLoadingMore = false;
-                const ctx = document.getElementById('singleChart')?.getContext('2d');
-                if (!ctx) return;
+                let plotlyChart = null;
+                const chartContainer = document.getElementById('plotlyChart');
+                const warningBox = document.getElementById('chart-warning');
+                const warningMessage = document.getElementById('warning-message');
 
-                const handleLazyLoad = (chart) => {
-                    if (isLoadingMore || !chart.data.datasets[0].data.length) return;
-                    const currentMin = chart.scales.x.min;
-                    const oldestDataPoint = chart.data.datasets[0].data[0].x;
-                    if (currentMin < oldestDataPoint) {
-                        isLoadingMore = true;
-                        const newEndDate = new Date(oldestDataPoint);
-                        const newStartDate = new Date(newEndDate.getTime() - (24 * 60 * 60 * 1000));
-                        window.Livewire.dispatch('loadMoreHistoricalData', {
-                            startDate: newStartDate.toISOString().split('T')[0],
-                            endDate: newEndDate.toISOString().split('T')[0]
-                        });
+                if (!chartContainer || !warningBox) return;
+
+                const createOrUpdateChart = (plotlyData, layout) => {
+                    if (plotlyChart) {
+                        Plotly.purge('plotlyChart');
                     }
+
+                    if (!plotlyData || plotlyData.length === 0) {
+                        console.log('No data to display');
+                        return;
+                    }
+
+                    // Konfigurasi layout default jika tidak ada
+                    const defaultLayout = {
+                        title: 'Historical Data Analysis',
+                        xaxis: {
+                            title: 'Timestamp',
+                            type: 'date',
+                            rangeslider: {
+                                visible: false
+                            }
+                        },
+                        yaxis: {
+                            title: 'Value'
+                        },
+                        margin: {
+                            l: 50,
+                            r: 20,
+                            b: 40,
+                            t: 40
+                        },
+                        paper_bgcolor: '#ffffff',
+                        plot_bgcolor: '#ffffff',
+                        hovermode: 'x unified',
+                        showlegend: true,
+                        legend: {
+                            x: 0,
+                            y: 1
+                        }
+                    };
+
+                    const finalLayout = {
+                        ...defaultLayout,
+                        ...layout
+                    };
+
+                    Plotly.newPlot('plotlyChart', plotlyData, finalLayout, {
+                        responsive: true,
+                        displayModeBar: true,
+                        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+                        displaylogo: false
+                    });
+
+                    plotlyChart = document.getElementById('plotlyChart');
                 };
 
-                const createOrUpdateChart = (initialData, metricName) => {
-                    if (singleChartInstance) singleChartInstance.destroy();
-                    isLoadingMore = false;
-                    singleChartInstance = new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            datasets: [{
-                                label: metricName,
-                                data: initialData,
-                                borderColor: '#3b82f6',
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                fill: true,
-                                tension: 0.1
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            parsing: false,
-                            plugins: {
-                                legend: {
-                                    display: true,
-                                    position: 'top'
-                                },
-                                tooltip: {
-                                    mode: 'index',
-                                    intersect: false
-                                },
-                                zoom: {
-                                    pan: {
-                                        enabled: true,
-                                        mode: 'x',
-                                        onPanComplete: ({
-                                            chart
-                                        }) => handleLazyLoad(chart)
-                                    },
-                                    zoom: {
-                                        wheel: {
-                                            enabled: true
-                                        },
-                                        pinch: {
-                                            enabled: true
-                                        },
-                                        mode: 'x'
-                                    }
-                                }
-                            },
-                            scales: {
-                                x: {
-                                    type: 'time',
-                                    time: {
-                                        unit: 'minute',
-                                        tooltipFormat: 'PPpp'
-                                    },
-                                    title: {
-                                        display: true,
-                                        text: 'Timestamp'
-                                    }
-                                },
-                                y: {
-                                    title: {
-                                        display: true,
-                                        text: 'Value'
-                                    }
-                                }
-                            },
-                            interaction: {
-                                mode: 'nearest',
-                                axis: 'x',
-                                intersect: false
-                            }
-                        }
-                    });
-                };
+                document.addEventListener('show-warning', event => {
+                    warningMessage.textContent = event.detail.message;
+                    warningBox.style.display = 'block';
+                });
 
                 document.addEventListener('chart-data-updated', event => {
+                    warningBox.style.display = 'none';
                     const chartData = event.detail.chartData;
-                    if (chartData && chartData.datasets.length > 0) {
-                        const dataset = chartData.datasets[0];
-                        const formattedData = chartData.labels.map((label, index) => ({
-                            x: new Date(label).getTime(),
-                            y: dataset.data[index]
+
+                    if (chartData && chartData.data && chartData.data.length > 0) {
+                        console.log('Plotly data received:', chartData);
+
+                        // Konversi data untuk Plotly.js - menggunakan timestamp asli dari database
+                        const plotlyData = chartData.data.map(trace => ({
+                            ...trace,
+                            x: trace.x.map(dateStr => new Date(dateStr)),
+                            y: trace.y.map(val => val === null ? null : parseFloat(val)),
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            line: {
+                                width: 2
+                            },
+                            marker: {
+                                size: 4
+                            }
                         }));
-                        createOrUpdateChart(formattedData, dataset.label);
+
+                        createOrUpdateChart(plotlyData, chartData.layout);
+                    } else {
+                        console.log('No chart data or data empty');
                     }
                 });
 
                 document.addEventListener('historical-data-prepended', event => {
-                    if (singleChartInstance && event.detail.data.labels.length > 0) {
-                        const newPoints = event.detail.data.labels.map((label, index) => ({
-                            x: new Date(label).getTime(),
-                            y: event.detail.data.datasets[0].data[index]
-                        }));
-                        singleChartInstance.data.datasets[0].data.unshift(...newPoints);
-                        singleChartInstance.update('none');
+                    if (plotlyChart && event.detail.data && event.detail.data.data.length > 0) {
+                        const newData = event.detail.data.data[0];
+                        const newX = newData.x.map(dateStr => new Date(dateStr));
+                        const newY = newData.y.map(val => val === null ? null : parseFloat(val));
+
+                        Plotly.extendTraces('plotlyChart', {
+                            x: [newX],
+                            y: [newY]
+                        }, [0]);
                     }
-                    isLoadingMore = false;
                 });
 
-                // KUNCI PERBAIKAN: Listener baru untuk pembaruan cerdas
                 document.addEventListener('update-last-point', event => {
                     const newData = event.detail.data;
-                    if (!singleChartInstance || !newData || !newData.metrics) return;
+                    if (!plotlyChart || !newData || !newData.metrics || !newData.timestamp) return;
 
-                    const currentMetric = singleChartInstance.data.datasets[0].label;
-                    const newPointValue = newData.metrics[currentMetric];
+                    const currentMetric = newData.metrics;
+                    const newPointValue = Object.values(currentMetric)[0];
                     if (typeof newPointValue === 'undefined') return;
 
-                    const newPointTimestamp = new Date(newData.timestamp).getTime();
-                    const chartData = singleChartInstance.data.datasets[0].data;
-                    const lastPoint = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+                    // Parse timestamp sebagai string lokal tanpa konversi timezone
+                    const newPointTimestamp = new Date(newData.timestamp);
 
-                    if (lastPoint && lastPoint.x === newPointTimestamp) {
-                        // Jika timestamp sama (masih dalam interval yang sama), perbarui nilainya
-                        lastPoint.y = newPointValue;
-                    } else {
-                        // Jika ini adalah interval baru, tambahkan titik baru
-                        chartData.push({
-                            x: newPointTimestamp,
-                            y: newPointValue
-                        });
-                    }
-                    singleChartInstance.update('quiet');
+                    console.log('Real-time update:', {
+                        originalTimestamp: newData.timestamp,
+                        parsedTimestamp: newPointTimestamp,
+                        value: newPointValue
+                    });
+
+                    // Update titik terakhir atau tambah titik baru
+                    Plotly.extendTraces('plotlyChart', {
+                        x: [
+                            [newPointTimestamp]
+                        ],
+                        y: [
+                            [newPointValue]
+                        ]
+                    }, [0]);
                 });
 
-                // Memuat data awal saat halaman pertama kali dibuka
+                // Memuat data awal
                 window.Livewire.dispatch('loadChartData');
             });
         </script>
