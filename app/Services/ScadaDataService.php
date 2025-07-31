@@ -334,7 +334,16 @@ class ScadaDataService
                     ->keyBy('time_group'); // Gunakan keyBy untuk pencarian cepat
 
                 // 2. Buat rentang waktu lengkap dari awal hingga akhir
-                $period = CarbonPeriod::create($start, $carbonIntervalSpec, $end);
+                // PERBAIKAN: Untuk interval day, gunakan pendekatan yang berbeda
+                if ($interval === 'day') {
+                    // Untuk day interval, buat period berdasarkan hari saja
+                    $periodStart = $start->copy()->startOfDay();
+                    $periodEnd = $end->copy()->startOfDay();
+                    $period = CarbonPeriod::create($periodStart, '1 day', $periodEnd);
+                } else {
+                    // Untuk interval lain, gunakan CarbonPeriod seperti biasa
+                    $period = CarbonPeriod::create($start, $carbonIntervalSpec, $end);
+                }
 
                 // Inisialisasi array kosong untuk hasil akhir
                 $labels = [];
@@ -360,10 +369,15 @@ class ScadaDataService
                 'x' => $labels,
                 'y' => $values,
                 'type' => 'scatter',
-                'mode' => 'lines', // Ganti ke 'lines' agar lebih jelas terlihat jedanya
+                'mode' => 'lines+markers',
                 'name' => $tag,
                 'line' => ['color' => $borderColor, 'width' => 2],
-                'connectgaps' => false, // <-- TAMBAHAN PENTING
+                'marker' => [
+                    'color' => $borderColor,
+                    'size' => 6, // Atur ukuran titik menjadi 6 piksel
+                    'symbol' => 'circle'
+                ],
+                'connectgaps' => false,
                 'hovertemplate' => '<b>%{x}</b><br>Value: %{y}<extra></extra>'
             ];
         }

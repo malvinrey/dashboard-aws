@@ -16,7 +16,7 @@ A real-time monitoring dashboard for AWS (Automatic Weather Station) SCADA data 
 -   **Interactive Charts**: Multi-metric visualization with Chart.js
 -   **Flexible Time Intervals**: Second, minute, hour, and day views
 -   **Date Range Filtering**: Custom start and end date/time selection
--   **Multi-metric Selection**: Choose multiple weather parameters to display
+-   **Multi-metric Selection & Filtering**: Choose one or more weather parameters (metrics) to display. Only selected metrics will be visualized and queried from the backend, ensuring efficient and relevant data display. You can select all, clear all, or pick specific metrics as needed. If no metric is selected, the chart will be cleared automatically.
 -   **Zoom & Pan**: Interactive chart navigation
 -   **Responsive Design**: Works on desktop and mobile devices
 
@@ -108,11 +108,11 @@ The application will be available at `http://localhost:8000`
 ### Historical Analysis
 
 1. **Access Analysis Page**: Click "Analysis Chart" in the navigation
-2. **Select Metrics**: Choose weather parameters to display (temperature, humidity, etc.)
+2. **Select Metrics**: Choose one or more weather parameters to display (temperature, humidity, etc.). The metric filter uses checkboxes, and you can select all, clear all, or pick specific metrics. The chart will only show data for the selected metrics. If no metric is selected, the chart will be cleared automatically.
 3. **Set Time Range**:
     - Choose time interval (second, minute, hour, day)
     - Set start and end dates/times
-4. **Apply Filters**: Click "Apply Filter" to update the chart
+4. **Apply Filters**: Click "Load Historical Data" to update the chart, or simply change the metric/interval/date to auto-update.
 5. **Interact with Chart**:
     - Zoom in/out using mouse wheel
     - Pan by dragging
