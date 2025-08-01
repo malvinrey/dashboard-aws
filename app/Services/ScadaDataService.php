@@ -281,41 +281,67 @@ class ScadaDataService
                 // ===================================================================
 
                 // 1. Ambil HANYA data mentah yang benar-benar ada di database
-                $rawData = ScadaDataTall::select('timestamp_device', 'nilai_tag')
+                // Optimasi: Gunakan chunking untuk dataset yang sangat besar
+                $maxBatchSize = config('scada.performance.max_batch_size', 1000);
+                $rawData = collect();
+
+                ScadaDataTall::select('timestamp_device', 'nilai_tag')
                     ->where('nama_tag', $tag)
                     ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
                     ->whereBetween('timestamp_device', [$start, $end])
                     ->orderBy('timestamp_device', 'asc')
-                    ->get();
+                    ->chunk($maxBatchSize, function ($chunk) use (&$rawData) {
+                        $rawData = $rawData->merge($chunk);
+                    });
 
                 if ($rawData->isEmpty()) {
                     continue; // Lanjut ke tag berikutnya jika tidak ada data sama sekali
                 }
 
-                // 2. Siapkan array hasil dan proses data untuk menyisipkan jeda (null)
+                // --- PERUBAHAN DI SINI ---
+                // Ubah data mentah ke format yang lebih sederhana untuk downsampling
+                $processedData = $rawData->map(function ($item) {
+                    return ['timestamp' => $item->timestamp_device, 'value' => (float)$item->nilai_tag];
+                });
+
+                // Terapkan downsampling jika data terlalu banyak
+                $originalCount = $processedData->count();
+                $maxPoints = config('scada.downsampling.max_points_per_series', 1000);
+                $minThreshold = config('scada.downsampling.min_points_threshold', 1000);
+                $downsamplingEnabled = config('scada.downsampling.enabled', true);
+
+                if ($downsamplingEnabled && $originalCount > $minThreshold) {
+                    $downsampledPoints = $this->downsampleData($processedData, $maxPoints);
+                    $downsampledCount = count($downsampledPoints);
+
+                    // Log downsampling performance
+                    if (config('scada.processing.enable_logging', true)) {
+                        Log::info('Data downsampling applied', [
+                            'tag' => $tag,
+                            'original_points' => $originalCount,
+                            'downsampled_points' => $downsampledCount,
+                            'reduction_percentage' => round((($originalCount - $downsampledCount) / $originalCount) * 100, 2)
+                        ]);
+                    }
+                } else {
+                    // Jika downsampling tidak diperlukan, gunakan data asli
+                    $downsampledPoints = $processedData->map(fn($item) => [
+                        $item['timestamp']->getTimestamp() * 1000,
+                        $item['value']
+                    ])->all();
+                    $downsampledCount = $originalCount;
+                }
+
+                // Konversi kembali ke format label & value yang dibutuhkan Plotly
                 $labels = [];
                 $values = [];
-                $lastTimestamp = null;
-                // Tentukan batas jeda dalam detik. Jika lebih dari ini, garis akan terputus.
-                $gapThresholdInSeconds = 30;
-
-                foreach ($rawData as $item) {
-                    $currentTimestamp = $item->timestamp_device;
-
-                    // Jika ini bukan data pertama dan jedanya signifikan
-                    if ($lastTimestamp && $currentTimestamp->diffInSeconds($lastTimestamp) > $gapThresholdInSeconds) {
-                        // Sisipkan titik "jeda" dengan nilai null
-                        $labels[] = $currentTimestamp->copy()->subSecond()->format('Y-m-d H:i:s');
-                        $values[] = null;
-                    }
-
-                    // Tambahkan titik data yang sebenarnya
-                    $labels[] = $currentTimestamp->format('Y-m-d H:i:s');
-                    $values[] = (float) $item->nilai_tag;
-
-                    // Update timestamp terakhir
-                    $lastTimestamp = $currentTimestamp;
+                foreach ($downsampledPoints as $point) {
+                    // Konversi UNIX timestamp (ms) kembali ke format tanggal ISO untuk Plotly
+                    $labels[] = Carbon::createFromTimestampMs($point[0])->format('Y-m-d H:i:s');
+                    $values[] = $point[1];
                 }
+                // --- AKHIR PERUBAHAN ---
+
             } else {
                 // ===================================================================
                 // KODE BARU UNTUK MENYISIPKAN NULL
@@ -517,5 +543,141 @@ class ScadaDataService
             'timestamp' => $latestTimeGroup,
             'metrics' => $aggregatedData,
         ];
+    }
+
+    /**
+     * Menyederhanakan kumpulan data besar menggunakan algoritma LTTB.
+     *
+     * @param Collection $data Koleksi data dengan objek ['timestamp' => Carbon, 'value' => float]
+     * @param int $threshold Jumlah titik data yang diinginkan
+     * @return array Data yang telah disederhanakan
+     */
+    public function downsampleData(Collection $data, int $threshold): array
+    {
+        if ($data->count() <= $threshold) {
+            return $data->map(fn($item) => [
+                $item['timestamp']->getTimestamp() * 1000, // LTTB butuh UNIX timestamp (ms)
+                $item['value']
+            ])->all();
+        }
+
+        // Ubah data ke format yang dibutuhkan oleh LTTB: [[timestamp, value], ...]
+        $formattedData = $data->map(fn($item) => [
+            $item['timestamp']->getTimestamp() * 1000,
+            $item['value']
+        ])->all();
+
+        // Lakukan downsampling menggunakan algoritma LTTB
+        return $this->lttbDownsample($formattedData, $threshold);
+    }
+
+    /**
+     * Implementasi algoritma Largest-Triangle-Three-Buckets (LTTB)
+     *
+     * @param array $data Array of [timestamp, value] pairs
+     * @param int $threshold Target number of points
+     * @return array Downsampled data
+     */
+    private function lttbDownsample(array $data, int $threshold): array
+    {
+        $dataLength = count($data);
+
+        if ($threshold >= $dataLength || $threshold <= 2) {
+            return $data;
+        }
+
+        $sampled = [];
+        $sampled[0] = $data[0]; // Always include the first point
+
+        $bucketSize = ($dataLength - 2) / ($threshold - 2);
+        $a = 0; // Index of the first point in the current bucket
+
+        for ($i = 0; $i < $threshold - 2; $i++) {
+            $bucketStart = floor(($i + 1) * $bucketSize) + 1;
+            $bucketEnd = floor(($i + 2) * $bucketSize) + 1;
+
+            if ($bucketEnd >= $dataLength) {
+                $bucketEnd = $dataLength - 1;
+            }
+
+            // Find the point with the largest triangle area
+            $maxArea = -1;
+            $maxAreaIndex = $bucketStart;
+
+            for ($j = $bucketStart; $j < $bucketEnd; $j++) {
+                $area = $this->triangleArea($data[$a], $data[$j], $data[$bucketEnd]);
+                if ($area > $maxArea) {
+                    $maxArea = $area;
+                    $maxAreaIndex = $j;
+                }
+            }
+
+            $sampled[] = $data[$maxAreaIndex];
+            $a = $maxAreaIndex;
+        }
+
+        $sampled[] = $data[$dataLength - 1]; // Always include the last point
+
+        return $sampled;
+    }
+
+    /**
+     * Calculate the area of a triangle formed by three points
+     *
+     * @param array $a First point [timestamp, value]
+     * @param array $b Second point [timestamp, value]
+     * @param array $c Third point [timestamp, value]
+     * @return float Triangle area
+     */
+    public function triangleArea(array $a, array $b, array $c): float
+    {
+        return abs(($b[0] - $a[0]) * ($c[1] - $a[1]) - ($c[0] - $a[0]) * ($b[1] - $a[1])) / 2;
+    }
+
+    /**
+     * Estimate the number of data points for a given time range and tag
+     *
+     * @param string $tag The tag name
+     * @param Carbon $start Start time
+     * @param Carbon $end End time
+     * @return int Estimated number of data points
+     */
+    public function estimateDataPoints(string $tag, Carbon $start, Carbon $end): int
+    {
+        return ScadaDataTall::where('nama_tag', $tag)
+            ->where('nilai_tag', 'REGEXP', '^[0-9.-]+$')
+            ->whereBetween('timestamp_device', [$start, $end])
+            ->count();
+    }
+
+    /**
+     * Get performance statistics for data processing
+     *
+     * @param array $tags Array of tag names
+     * @param string $interval Time interval
+     * @param Carbon $start Start time
+     * @param Carbon $end End time
+     * @return array Performance statistics
+     */
+    public function getPerformanceStats(array $tags, string $interval, Carbon $start, Carbon $end): array
+    {
+        $stats = [];
+
+        foreach ($tags as $tag) {
+            $totalPoints = $this->estimateDataPoints($tag, $start, $end);
+            $maxPoints = config('scada.downsampling.max_points_per_series', 1000);
+            $downsamplingEnabled = config('scada.downsampling.enabled', true);
+
+            $stats[$tag] = [
+                'total_points' => $totalPoints,
+                'will_downsample' => $downsamplingEnabled && $totalPoints > $maxPoints,
+                'estimated_reduction' => $downsamplingEnabled && $totalPoints > $maxPoints
+                    ? round((($totalPoints - $maxPoints) / $totalPoints) * 100, 2)
+                    : 0,
+                'final_points' => $downsamplingEnabled && $totalPoints > $maxPoints ? $maxPoints : $totalPoints
+            ];
+        }
+
+        return $stats;
     }
 }
