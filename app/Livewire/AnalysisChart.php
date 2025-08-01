@@ -50,6 +50,35 @@ class AnalysisChart extends Component
     }
 
     /**
+     * Lifecycle Hook that runs when the $realtimeEnabled property is updated.
+     * This method handles the logic for re-enabling real-time mode.
+     */
+    public function updatedRealtimeEnabled()
+    {
+        // This logic only runs when the toggle is turned ON.
+        if ($this->realtimeEnabled) {
+            Log::info('Real-time updates re-enabled by user.');
+
+            // To avoid a jarring jump from historical data to live data,
+            // we reset the view to a sensible "live" timeframe.
+            if ($this->interval === 'second') {
+                // For 'second' interval, jump to the last 30 minutes.
+                $this->endDate = now()->toDateTimeString();
+                $this->startDate = now()->subMinutes(30)->toDateTimeString();
+            } else {
+                // For other intervals, jump to today's data.
+                $this->startDate = now()->startOfDay()->toDateString();
+                $this->endDate = now()->endOfDay()->toDateString();
+            }
+
+            // After resetting the date range, reload the chart to show the new "live" view.
+            $this->loadChartData();
+        } else {
+            Log::info('Real-time updates disabled by user.');
+        }
+    }
+
+    /**
      * The MAIN method to fetch and display chart data.
      * This is called ONLY by the "Load Historical Data" button.
      */
@@ -106,7 +135,6 @@ class AnalysisChart extends Component
                 $this->earliestLoadedDate = $earliestTimestamp;
             }
         }
-
         $this->dispatch('chart-data-updated', chartData: $chartData);
     }
 

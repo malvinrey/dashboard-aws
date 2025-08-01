@@ -384,8 +384,6 @@ class ScadaDataService
 
         // 5. Buat object layout untuk styling grafik
         $layout = [
-            'xaxis' => ['title' => 'Timestamp'],
-            'yaxis' => ['title' => 'Value'],
             'margin' => ['l' => 50, 'r' => 20, 'b' => 40, 't' => 40],
             'paper_bgcolor' => '#ffffff',
             'plot_bgcolor' => '#ffffff',

@@ -14,17 +14,15 @@
 
         {{-- Bagian Filter --}}
         <div class="filters">
-            <div class="filter-group">
-                <label>Select Metrics:</label>
-                <div class="metrics-checkbox-container max-h-60 overflow-y-auto px-4 py-2">
+            <div class="filter-group" wire:ignore> {{-- ✅ Bungkus dengan wire:ignore --}}
+                <label for="metrics-select2">Select Metrics:</label>
+                <select class="js-example-basic-multiple" {{-- Gunakan kelas dari contoh Select2 --}} id="metrics-select2"
+                    {{-- Beri ID unik --}} name="tags[]" {{-- Atribut name standar --}} multiple="multiple">
+                    {{-- <option value="" disabled selected>Pilih metrics...</option> --}}
                     @foreach ($allTags as $tag)
-                        <label class="metric-checkbox block py-1">
-                            <input type="checkbox" wire:model.defer="selectedTags" value="{{ $tag }}"
-                                class="metric-checkbox-input mr-2">
-                            <span class="metric-checkbox-label">{{ ucfirst($tag) }}</span>
-                        </label>
+                        <option value="{{ $tag }}">{{ ucfirst($tag) }}</option>
                     @endforeach
-                </div>
+                </select>
             </div>
             <div class="filter-group">
                 <label>Select Interval:</label>
@@ -70,24 +68,42 @@
         {{-- Kontainer untuk Grafik Plotly --}}
         <div class="single-chart-container" wire:ignore>
             <div id="plotlyChart" style="width: 100%; height: 100%;"></div>
+            {{-- Tombol "Load More" yang hanya muncul untuk interval 'second' --}}
+            @if ($interval === 'second')
+                <div id="load-more-container">
+                    <button wire:click="loadMoreSeconds" wire:loading.attr="disabled" class="btn-secondary">
+                        <div wire:loading wire:target="loadMoreSeconds" class="spinner"
+                            style="width: 16px; height: 16px; border-width: 2px; margin-right: 8px;"></div>
+                        <span wire:loading.remove wire:target="loadMoreSeconds">Load 30 Minutes Earlier</span>
+                        <span wire:loading wire:target="loadMoreSeconds">Loading...</span>
+                    </button>
+                </div>
+            @endif
         </div>
-
-        {{-- Tombol "Load More" yang hanya muncul untuk interval 'second' --}}
-        @if ($interval === 'second')
-            <div style="text-align: center; margin-top: 16px;">
-                <button wire:click="loadMoreSeconds" wire:loading.attr="disabled" class="btn-secondary">
-                    <div wire:loading wire:target="loadMoreSeconds" class="spinner"
-                        style="width: 16px; height: 16px; border-width: 2px; margin-right: 8px;"></div>
-                    <span wire:loading.remove wire:target="loadMoreSeconds">Load 30 Minutes Earlier</span>
-                    <span wire:loading wire:target="loadMoreSeconds">Loading...</span>
-                </button>
-            </div>
-        @endif
     </div>
 
     @script
         <script>
             document.addEventListener('livewire:navigated', () => {
+
+                // Inisialisasi Select2 pada elemen dengan ID #metrics-select2
+                $('#metrics-select2').select2({
+                    // Ukuran static untuk kontainer select
+                    width: '300px',
+                    maximumSelectionLength: 5,
+                    dropdownAutoWidth: false,
+                    dropdownParent: $('body')
+                });
+
+                // Pasang event listener 'change' dari Select2
+                $('#metrics-select2').on('change', function(e) {
+                    // Ambil semua nilai yang dipilih
+                    var selectedValues = $(this).val();
+
+                    // Kirim data ke properti 'selectedTags' di Livewire
+                    @this.set('selectedTags', selectedValues);
+                });
+
                 const chartContainer = document.getElementById('plotlyChart');
                 const warningBox = document.getElementById('chart-warning');
                 const warningMessage = document.getElementById('warning-message');
@@ -99,16 +115,10 @@
                     isCatchingUp: false,
                 };
 
-                /**
-                 * KUNCI PERBAIKAN: Fungsi ini sekarang memeriksa SEMUA trace
-                 * untuk menemukan timestamp paling baru yang sebenarnya.
-                 */
                 const updateLastKnownTimestamp = () => {
                     const plotlyChart = document.getElementById('plotlyChart');
                     if (plotlyChart && plotlyChart.data && plotlyChart.data.length > 0) {
                         let maxTimestamp = 0;
-
-                        // Loop melalui semua trace untuk menemukan waktu maksimum
                         plotlyChart.data.forEach(trace => {
                             if (trace.x && trace.x.length > 0) {
                                 const lastTimestampInTrace = new Date(trace.x[trace.x.length - 1])
@@ -118,21 +128,21 @@
                                 }
                             }
                         });
-
                         if (maxTimestamp > 0) {
                             const lastDate = new Date(maxTimestamp);
                             globalState.lastKnownTimestamp = lastDate.toISOString().slice(0, 19).replace('T', ' ');
                         } else {
                             globalState.lastKnownTimestamp = null;
                         }
-
                     } else {
                         globalState.lastKnownTimestamp = null;
                     }
                 };
 
                 document.addEventListener('visibilitychange', () => {
-                    if (document.visibilityState === 'visible' && globalState.lastKnownTimestamp) {
+                    const realtimeToggle = document.getElementById('realtime-toggle');
+                    if (document.visibilityState === 'visible' && globalState.lastKnownTimestamp &&
+                        realtimeToggle && realtimeToggle.checked) {
                         globalState.isCatchingUp = true;
                         window.Livewire.dispatch('catchUpMissedData', {
                             lastKnownTimestamp: globalState.lastKnownTimestamp
@@ -189,15 +199,13 @@
                     warningBox.style.display = 'block';
                 });
 
+                // KUNCI PERBAIKAN 2: Kembalikan listener 'update-last-point' yang lebih sederhana
                 document.addEventListener('update-last-point', event => {
-
                     if (globalState.isCatchingUp) {
-                        return; // Berhenti di sini jika sedang catch-up
+                        return; // Hentikan jika sedang catch-up
                     }
-
                     const plotlyChart = document.getElementById('plotlyChart');
                     if (!plotlyChart || !plotlyChart.data || plotlyChart.data.length === 0) return;
-
                     const newData = event.detail.data;
                     if (!newData || !newData.metrics || !newData.timestamp) return;
 
@@ -234,25 +242,24 @@
                     updateLastKnownTimestamp();
                 });
 
+                // HAPUS listener 'append-new-points' yang lebih berat
+
                 document.addEventListener('append-missed-points', event => {
                     const missedData = event.detail.data;
                     const plotlyChart = document.getElementById('plotlyChart');
                     if (!plotlyChart || !plotlyChart.data || !missedData) {
-                        globalState.isCatchingUp = false; // Pastikan flag dimatikan bahkan jika tidak ada data
+                        globalState.isCatchingUp = false;
                         return;
                     }
-
                     plotlyChart.data.forEach((trace, traceIndex) => {
                         const metricName = trace.name;
                         if (missedData[metricName] && missedData[metricName].length > 0) {
                             const pointsToAdd = missedData[metricName];
                             const newX = pointsToAdd.map(p => new Date(p.timestamp));
                             const newY = pointsToAdd.map(p => p.value);
-
                             const breakDate = new Date(newX[0].getTime() - 1000);
                             const finalX = [breakDate, ...newX];
                             const finalY = [null, ...newY];
-
                             Plotly.extendTraces('plotlyChart', {
                                 x: [finalX],
                                 y: [finalY]
