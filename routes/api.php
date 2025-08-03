@@ -9,3 +9,6 @@ use App\Http\Controllers\AnalysisController;
 
 // Route untuk API data grafik
 Route::get('/analysis-data', [AnalysisController::class, 'getAnalysisData']);
+
+// Endpoint baru untuk data real-time
+Route::get('/latest-data', [AnalysisController::class, 'getLatestDataApi']);

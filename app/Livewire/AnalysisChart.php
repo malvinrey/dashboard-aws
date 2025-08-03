@@ -50,75 +50,71 @@ class AnalysisChart extends Component
     }
 
     /**
-     * Lifecycle Hook that runs when the $realtimeEnabled property is updated.
-     * This method handles the logic for re-enabling real-time mode.
+     * Dijalankan saat toggle real-time diubah oleh pengguna.
      */
     public function updatedRealtimeEnabled()
     {
-        // This logic only runs when the toggle is turned ON.
         if ($this->realtimeEnabled) {
-            Log::info('Real-time updates re-enabled by user.');
+            // Jika pengguna MENGAKTIFKAN toggle, reset tampilan ke "live".
+            Log::info('Real-time updates re-enabled by user action.');
 
-            // To avoid a jarring jump from historical data to live data,
-            // we reset the view to a sensible "live" timeframe.
             if ($this->interval === 'second') {
-                // For 'second' interval, jump to the last 30 minutes.
                 $this->endDate = now()->toDateTimeString();
                 $this->startDate = now()->subMinutes(30)->toDateTimeString();
             } else {
-                // For other intervals, jump to today's data.
                 $this->startDate = now()->startOfDay()->toDateString();
                 $this->endDate = now()->endOfDay()->toDateString();
             }
 
-            // After resetting the date range, reload the chart to show the new "live" view.
+            // Muat ulang chart dengan data live.
             $this->loadChartData();
         } else {
-            Log::info('Real-time updates disabled by user.');
+            // Jika pengguna MENONAKTIFKAN, cukup log aksi tersebut.
+            // Tidak perlu memuat ulang data apa pun.
+            Log::info('Real-time updates disabled by user action.');
         }
     }
 
+    // KUNCI PERBAIKAN 1: Buat metode baru yang dipanggil oleh tombol.
     /**
-     * The MAIN method to fetch and display chart data.
-     * This is called ONLY by the "Load Historical Data" button.
+     * Aksi ini secara eksplisit mengalihkan ke mode historis dan memuat data.
+     */
+    public function setHistoricalModeAndLoad()
+    {
+        // Langkah 1: Nonaktifkan mode real-time. Ini adalah niat pengguna.
+        $this->realtimeEnabled = false;
+
+        // Langkah 2: Panggil metode pemuat data.
+        $this->loadChartData();
+    }
+
+    // KUNCI PERBAIKAN 2: Jadikan loadChartData sebagai pemuat murni.
+    /**
+     * Metode ini SEKARANG HANYA bertugas memuat data berdasarkan
+     * properti yang ada, tanpa mengubah state 'realtimeEnabled'.
      */
     public function loadChartData()
     {
-        Log::info('Load Historical Data button clicked', [
+        // HAPUS BARIS INI: $this->realtimeEnabled = false;
+
+        Log::info('Executing loadChartData', [
             'selectedTags' => $this->selectedTags,
             'interval' => $this->interval,
             'startDate' => $this->startDate,
-            'endDate' => $this->endDate
+            'endDate' => $this->endDate,
+            'isRealtime' => $this->realtimeEnabled // Tambahkan log untuk status saat ini
         ]);
 
         if (empty($this->selectedTags)) {
-            // If no tags are selected, clear the chart
             $this->dispatch('chart-data-updated', chartData: ['data' => [], 'layout' => []]);
             return;
         }
 
-        // --- TIME RANGE PREPARATION LOGIC ---
-        $startCarbon = Carbon::parse($this->startDate)->startOfDay();
-        $endCarbon = Carbon::parse($this->endDate)->endOfDay();
+        $startCarbon = Carbon::parse($this->startDate);
+        $endCarbon = Carbon::parse($this->endDate);
 
-        // For intervals that aggregate by day, ensure we cover the full day.
-        if (in_array($this->interval, ['hour', 'day', 'minute'])) {
-            $start = $startCarbon->startOfDay()->toDateTimeString();
-            $end = $endCarbon->endOfDay()->toDateTimeString();
-        } else { // This is for 'second' interval
-            // For 'second' interval, we must use a short time range for performance.
-            // If the user's selected range is too large, we auto-adjust it.
-            if ($endCarbon->diffInSeconds($startCarbon) > 3600) { // More than 1 hour
-                $end = now()->toDateTimeString();
-                $start = now()->subMinutes(30)->toDateTimeString();
-                $this->dispatch('show-warning', message: 'Time range too large for "second" interval, adjusted to last 30 minutes.');
-            } else {
-                // Use the precise time if the range is short enough
-                $start = $startCarbon->toDateTimeString();
-                $end = $endCarbon->toDateTimeString();
-            }
-        }
-        // --- END OF LOGIC ---
+        $start = $startCarbon->startOfDay()->toDateTimeString();
+        $end = $endCarbon->endOfDay()->toDateTimeString();
 
         $chartData = app(ScadaDataService::class)->getHistoricalChartData(
             $this->selectedTags,
@@ -127,14 +123,14 @@ class AnalysisChart extends Component
             $end
         );
 
-        // Update the state for the "Load More" button based on the actual data loaded.
+        // ... (sisa logika di metode ini tidak berubah)
         if ($this->interval === 'second' && !empty($chartData['data'])) {
-            // Find the earliest timestamp from all the new data traces
             $earliestTimestamp = collect($chartData['data'])->flatMap(fn($trace) => $trace['x'])->min();
             if ($earliestTimestamp) {
                 $this->earliestLoadedDate = $earliestTimestamp;
             }
         }
+
         $this->dispatch('chart-data-updated', chartData: $chartData);
     }
 
@@ -187,26 +183,10 @@ class AnalysisChart extends Component
         }
     }
 
-    /**
-     * Fetches data that was missed while the browser tab was inactive.
-     * This is triggered by a JavaScript event when the tab becomes visible again.
-     */
-    #[On('catchUpMissedData')]
-    public function catchUpMissedData(string $lastKnownTimestamp)
-    {
-        if (empty($this->selectedTags) || $this->interval !== 'second') {
-            return;
-        }
 
-        $missedData = app(ScadaDataService::class)->getRecentDataSince(
-            $this->selectedTags,
-            $lastKnownTimestamp
-        );
 
-        if (!empty($missedData)) {
-            $this->dispatch('append-missed-points', data: $missedData);
-        }
-    }
+    // HAPUS method 'catchUpMissedData' - SUDAH TIDAK DIPERLUKAN
+    // Gap sekarang dibuat langsung di frontend visibilitychange listener
 
     /**
      * Renders the component's view.

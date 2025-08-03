@@ -12,13 +12,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('scada_data_tall', function (Blueprint $table) {
-            // Tambahkan kolom batch_id dan nama_group setelah kolom 'id'
-            // Kita buat nullable() agar data lama tidak error
-            $table->uuid('batch_id')->after('id')->nullable();
+            // Tambahkan kolom nama_group setelah kolom 'batch_id'
+            // batch_id sudah ada di migration sebelumnya
             $table->string('nama_group')->after('batch_id')->nullable();
 
             // Tambahkan index untuk mempercepat query
-            $table->index('batch_id');
             $table->index('nama_group');
         });
     }
@@ -31,8 +29,7 @@ return new class extends Migration
         Schema::table('scada_data_tall', function (Blueprint $table) {
             // Hapus index dan kolom jika migrasi di-rollback
             $table->dropIndex(['nama_group']);
-            $table->dropIndex(['batch_id']);
-            $table->dropColumn(['nama_group', 'batch_id']);
+            $table->dropColumn(['nama_group']);
         });
     }
 };

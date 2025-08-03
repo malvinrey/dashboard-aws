@@ -53,4 +53,61 @@ class AnalysisController extends Controller
             return response()->json(['error' => 'Failed to fetch analysis data.'], 500);
         }
     }
+
+    /**
+     * Endpoint API super ringan untuk pembaruan real-time.
+     */
+    public function getLatestDataApi(Request $request)
+    {
+        $startTime = microtime(true);
+
+        try {
+            // Validasi input
+            $validated = $request->validate([
+                'tags' => 'required|array',
+                'tags.*' => 'string',
+                'interval' => 'required|string|in:second,minute,hour,day',
+            ]);
+
+            // Panggil service untuk mendapatkan data terbaru
+            $latestData = $this->scadaDataService->getLatestAggregatedDataPoint(
+                $validated['tags'],
+                $validated['interval']
+            );
+
+            $endTime = microtime(true);
+            $processingTime = round(($endTime - $startTime) * 1000, 2);
+
+            // Log performance metrics
+            Log::info('Latest data API called', [
+                'tags' => $validated['tags'],
+                'interval' => $validated['interval'],
+                'processing_time_ms' => $processingTime,
+                'has_data' => !is_null($latestData),
+                'user_agent' => $request->header('User-Agent')
+            ]);
+
+            if (!$latestData) {
+                return response()->json(null, 204)
+                    ->header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                    ->header('Pragma', 'no-cache')
+                    ->header('Expires', '0');
+            }
+
+            return response()->json($latestData)
+                ->header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                ->header('Pragma', 'no-cache')
+                ->header('Expires', '0');
+        } catch (\Exception $e) {
+            $endTime = microtime(true);
+            $processingTime = round(($endTime - $startTime) * 1000, 2);
+
+            Log::error('Error fetching latest data: ' . $e->getMessage(), [
+                'request' => $request->all(),
+                'exception' => $e,
+                'processing_time_ms' => $processingTime
+            ]);
+            return response()->json(['error' => 'Failed to fetch latest data.'], 500);
+        }
+    }
 }
