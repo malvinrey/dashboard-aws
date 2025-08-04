@@ -17,83 +17,54 @@ class ScadaDataServiceTest extends TestCase
         $this->service = new ScadaDataService();
     }
 
-    public function test_downsampling_reduces_data_points_correctly()
+    public function test_get_unique_tags_returns_correct_tags()
     {
-        // Create test data with 2000 points
-        $testData = collect();
-        for ($i = 0; $i < 2000; $i++) {
-            $testData->push([
-                'timestamp' => Carbon::now()->addSeconds($i),
-                'value' => sin($i * 0.1) + rand(-10, 10) / 100 // Sine wave with noise
-            ]);
-        }
+        $tags = $this->service->getUniqueTags();
 
-        // Test downsampling to 1000 points
-        $downsampled = $this->service->downsampleData($testData, 1000);
+        $this->assertInstanceOf(Collection::class, $tags);
+        $this->assertCount(8, $tags);
 
-        // Verify the result
-        $this->assertCount(1000, $downsampled);
-        $this->assertLessThan(2000, count($downsampled));
+        $expectedTags = [
+            'par_sensor',
+            'solar_radiation',
+            'wind_speed',
+            'wind_direction',
+            'temperature',
+            'humidity',
+            'pressure',
+            'rainfall'
+        ];
 
-        // Verify data structure
-        foreach ($downsampled as $point) {
-            $this->assertIsArray($point);
-            $this->assertCount(2, $point);
-            $this->assertIsNumeric($point[0]); // timestamp
-            $this->assertIsNumeric($point[1]); // value
+        foreach ($expectedTags as $tag) {
+            $this->assertContains($tag, $tags);
         }
     }
 
-    public function test_downsampling_preserves_first_and_last_points()
+    public function test_get_total_records_returns_integer()
     {
-        // Create test data
-        $testData = collect();
-        for ($i = 0; $i < 100; $i++) {
-            $testData->push([
-                'timestamp' => Carbon::now()->addSeconds($i),
-                'value' => $i
-            ]);
-        }
+        $totalRecords = $this->service->getTotalRecords();
 
-        // Test downsampling to 10 points
-        $downsampled = $this->service->downsampleData($testData, 10);
-
-        // Verify first and last points are preserved
-        $this->assertEquals($testData->first()['timestamp']->getTimestamp() * 1000, $downsampled[0][0]);
-        $this->assertEquals($testData->first()['value'], $downsampled[0][1]);
-
-        $this->assertEquals($testData->last()['timestamp']->getTimestamp() * 1000, $downsampled[count($downsampled) - 1][0]);
-        $this->assertEquals($testData->last()['value'], $downsampled[count($downsampled) - 1][1]);
+        $this->assertIsInt($totalRecords);
+        $this->assertGreaterThanOrEqual(0, $totalRecords);
     }
 
-    public function test_downsampling_returns_original_data_when_threshold_not_exceeded()
+    public function test_get_log_data_returns_collection()
     {
-        // Create test data with only 50 points
-        $testData = collect();
-        for ($i = 0; $i < 50; $i++) {
-            $testData->push([
-                'timestamp' => Carbon::now()->addSeconds($i),
-                'value' => $i
-            ]);
-        }
+        $logData = $this->service->getLogData(10);
 
-        // Test downsampling to 100 points (threshold not exceeded)
-        $downsampled = $this->service->downsampleData($testData, 100);
-
-        // Should return original data
-        $this->assertCount(50, $downsampled);
+        $this->assertInstanceOf(Collection::class, $logData);
+        $this->assertLessThanOrEqual(10, $logData->count());
     }
 
-    public function test_lttb_algorithm_calculates_triangle_area_correctly()
+    public function test_get_dashboard_metrics_returns_array()
     {
-        // Test triangle area calculation
-        $a = [0, 0];   // Point at origin
-        $b = [3, 0];   // Point at (3,0)
-        $c = [0, 4];   // Point at (0,4)
+        $metrics = $this->service->getDashboardMetrics();
 
-        // This should form a right triangle with area = (3 * 4) / 2 = 6
-        $area = $this->service->triangleArea($a, $b, $c);
+        $this->assertIsArray($metrics);
+        $this->assertArrayHasKey('metrics', $metrics);
+        $this->assertArrayHasKey('lastPayloadInfo', $metrics);
 
-        $this->assertEquals(6.0, $area);
+        // Check if metrics is an array
+        $this->assertIsArray($metrics['metrics']);
     }
 }

@@ -17,7 +17,7 @@ A real-time monitoring dashboard for AWS (Automatic Weather Station) SCADA data 
 -   **Flexible Time Intervals**: Second, minute, hour, and day views
 -   **Date Range Filtering**: Custom start and end date/time selection
 -   **Multi-metric Selection & Filtering**: Choose one or more weather parameters (metrics) to display. Only selected metrics will be visualized and queried from the backend, ensuring efficient and relevant data display. You can select all, clear all, or pick specific metrics as needed. If no metric is selected, the chart will be cleared automatically.
--   **Smart Data Downsampling**: LTTB algorithm automatically optimizes large datasets for fast rendering while preserving visual fidelity
+-   **Smart Data Aggregation**: Database-level aggregation automatically optimizes large datasets for fast rendering while preserving data accuracy
 -   **Zoom & Pan**: Interactive chart navigation
 -   **Responsive Design**: Works on desktop and mobile devices
 
@@ -173,7 +173,7 @@ app/
 ├── Models/
 │   └── ScadaDataTall.php          # Data model
 └── Services/
-    └── ScadaDataService.php       # Business logic with LTTB downsampling
+    └── ScadaDataService.php       # Business logic with database aggregation
 ```
 
 ### Frontend Components
@@ -215,7 +215,7 @@ resources/views/
 
 ### Performance Optimization
 
--   **LTTB Downsampling**: Largest-Triangle-Three-Buckets algorithm for large datasets
+-   **Database Aggregation**: Efficient data aggregation at database level
 -   **Configurable Thresholds**: Adjustable data point limits per series
 -   **Automatic Optimization**: Applied when data exceeds minimum threshold
 -   **Visual Fidelity**: Preserves chart shape while reducing data points by up to 90%
@@ -331,10 +331,10 @@ Receive SCADA data payload
     ```
 
 5. **Slow Chart Loading with Large Datasets**
-    - Verify downsampling is enabled: `SCADA_DOWNSAMPLING_ENABLED=true`
-    - Check data point threshold: `SCADA_MIN_POINTS_THRESHOLD=1000`
-    - Monitor logs for downsampling performance
-    - Consider increasing `SCADA_MAX_POINTS_PER_SERIES` for higher fidelity
+    - Verify database aggregation is working correctly
+    - Check interval selection (minute, hour, day for aggregation)
+    - Monitor logs for aggregation performance
+    - Consider using wider date ranges for better aggregation
 
 ## 📝 License
 
@@ -355,7 +355,7 @@ For support and questions:
 -   Create an issue in the repository
 -   Contact the development team
 -   Check the troubleshooting section above
--   Review the [Downsampling Optimization Documentation](docs/DOWNSAMPLING_OPTIMIZATION.md)
+-   Review the [Interval Aggregation Documentation](docs/INTERVAL_AGGREGATION_FIX.md)
 
 ---
 
@@ -363,17 +363,17 @@ For support and questions:
 
 ## 🚀 Performance Features
 
-### Data Downsampling Optimization
+### Data Aggregation Optimization
 
-This application includes advanced data downsampling using the **Largest-Triangle-Three-Buckets (LTTB)** algorithm to handle large datasets efficiently:
+This application includes advanced data aggregation at the database level to handle large datasets efficiently:
 
--   **Automatic Optimization**: Applied when datasets exceed 1000 points
+-   **Automatic Optimization**: Applied based on selected interval (minute, hour, day)
 -   **90% Data Reduction**: Reduces transfer time and memory usage
--   **Visual Fidelity**: Preserves chart shape and important data points
--   **Configurable**: Adjustable thresholds via environment variables
+-   **Data Accuracy**: Preserves statistical accuracy with AVG aggregation
+-   **Configurable**: Different aggregation levels based on user interval selection
 -   **Performance Monitoring**: Built-in logging and statistics
 
-For detailed information about the downsampling implementation, see [docs/DOWNSAMPLING_OPTIMIZATION.md](docs/DOWNSAMPLING_OPTIMIZATION.md).
+For detailed information about the aggregation implementation, see [docs/INTERVAL_AGGREGATION_FIX.md](docs/INTERVAL_AGGREGATION_FIX.md).
 
 ### Real-time Polling Optimization
 

@@ -50,6 +50,11 @@ class AnalysisChart extends Component
     }
 
     /**
+     * KUNCI PERBAIKAN: Metode updatedInterval() telah dihapus sepenuhnya.
+     * Mengubah interval sekarang tidak akan lagi me-reset tanggal yang sudah dipilih.
+     */
+
+    /**
      * Dijalankan saat toggle real-time diubah oleh pengguna.
      */
     public function updatedRealtimeEnabled()
@@ -58,13 +63,9 @@ class AnalysisChart extends Component
             // Jika pengguna MENGAKTIFKAN toggle, reset tampilan ke "live".
             Log::info('Real-time updates re-enabled by user action.');
 
-            if ($this->interval === 'second') {
-                $this->endDate = now()->toDateTimeString();
-                $this->startDate = now()->subMinutes(30)->toDateTimeString();
-            } else {
-                $this->startDate = now()->startOfDay()->toDateString();
-                $this->endDate = now()->endOfDay()->toDateString();
-            }
+            // KUNCI PERBAIKAN: Selalu gunakan format tanggal yang kompatibel dengan input HTML
+            $this->startDate = now()->subDay()->toDateString();
+            $this->endDate = now()->toDateString();
 
             // Muat ulang chart dengan data live.
             $this->loadChartData();

@@ -72,13 +72,6 @@
             box-shadow: var(--shadow-sm);
         }
 
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background-color: var(--green-color);
-        }
-
         .status-text {
             color: var(--text-secondary);
             font-weight: 500;
@@ -167,10 +160,20 @@
 
         .filter-group input[type="date"]:focus,
         .filter-group select:focus,
-        .interval-buttons button:focus {
+        .interval-buttons button:focus:not(.loading) {
             outline: none;
             border-color: var(--primary-color);
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+        }
+
+        .filter-group input[type="date"]:not(:placeholder-shown) {
+            border-color: var(--primary-color);
+        }
+
+        /* Focus ring untuk keyboard navigation */
+        .interval-buttons button:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
         }
 
         /* Styling untuk select metric agar konsisten dengan filter lainnya */
@@ -201,6 +204,13 @@
         .interval-buttons button {
             cursor: pointer;
             white-space: nowrap;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            user-select: none;
+            min-width: 90px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         .interval-buttons button:not(:last-child) {
@@ -214,11 +224,91 @@
             border-bottom-left-radius: 0;
         }
 
+        .interval-buttons button:hover:not(.active):not(.loading) {
+            background-color: var(--bg-light);
+            border-color: var(--primary-color);
+        }
+
         .interval-buttons button.active {
             background-color: var(--primary-color);
             color: white;
             border-color: var(--primary-color);
             z-index: 1;
+            box-shadow: 0 0 0 1px var(--primary-color), 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+
+
+
+        .interval-buttons button:disabled,
+        .interval-buttons button.loading {
+            opacity: 0.6;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .interval-buttons button.loading {
+            position: relative;
+            background-color: var(--bg-light) !important;
+            color: var(--text-secondary) !important;
+        }
+
+        .interval-buttons button.loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 12px;
+            height: 12px;
+            margin: -6px 0 0 -6px;
+            border: 2px solid transparent;
+            border-top: 2px solid var(--text-secondary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            opacity: 0.8;
+        }
+
+        .interval-buttons button.loading .loading-text {
+            opacity: 0.7;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .interval-buttons .loading-text {
+            font-size: 12px;
+            opacity: 0.8;
+            transition: opacity 0.2s ease;
+        }
+
+
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            25% {
+                transform: translateX(-5px);
+            }
+
+            75% {
+                transform: translateX(5px);
+            }
+        }
+
+        .has-selection {
+            border-color: var(--primary-color) !important;
         }
 
         .btn-primary {
@@ -231,10 +321,33 @@
             align-items: center;
             justify-content: center;
             box-shadow: var(--shadow-sm);
+            min-width: 185px;
         }
 
         .btn-primary:hover {
             background-color: var(--primary-hover-color);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            background-color: var(--primary-color);
+            position: relative;
+            min-width: 185px;
+        }
+
+        .btn-primary:disabled::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 16px;
+            height: 16px;
+            margin: -8px 0 0 -8px;
+            border: 2px solid transparent;
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
         }
 
         .btn-secondary {
@@ -380,27 +493,6 @@
             z-index: 1001;
         }
 
-        /* Status indicator untuk real-time data */
-        .realtime-status {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-            background: rgba(0, 0, 0, 0.8);
-            border-radius: 50%;
-            padding: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
-
-        .status-dot-green {
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background-color: #10b981;
-            box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
-            animation: pulse 2s infinite;
-        }
-
         /* Tooltip untuk status indicator */
         .realtime-status:hover::after {
             content: attr(title);
@@ -416,9 +508,74 @@
             font-size: 12px;
             white-space: nowrap;
             z-index: 1001;
+            pointer-events: none;
         }
 
-        @keyframes pulse {
+        /* GANTI SEMUA CSS INDIKATOR LAMA DENGAN BLOK INI */
+        .realtime-status-dot {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 1002;
+            width: 20px;
+            /* Ukuran titik */
+            height: 20px;
+            /* Ukuran titik */
+            border-radius: 50%;
+            /* Membuatnya bulat sempurna */
+            transition: all 0.3s ease;
+            cursor: help;
+        }
+
+        /* State 1: Terhubung (Hijau) */
+        .realtime-status-dot.connected {
+            background-color: #10b981;
+            /* Green */
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
+            animation: pulse-green 2s infinite;
+        }
+
+        /* State 2: Menerima Data (Kuning) */
+        .realtime-status-dot.loading {
+            background-color: #fbbf24;
+            /* Amber/Yellow */
+            box-shadow: 0 0 12px rgba(251, 191, 36, 0.8);
+            animation: pulse-yellow 1s infinite;
+        }
+
+        /* State 3: Terputus (Merah) */
+        .realtime-status-dot.disconnected {
+            background-color: #ef4444;
+            /* Red */
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+            animation: none;
+        }
+
+        /* State 4: Stale / Koneksi terputus saat Real-time ON (Merah berdenyut pelan) */
+        .realtime-status-dot.stale {
+            background-color: #ef4444;
+            /* Red */
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+            /* Denyut merah yang lebih lambat untuk menandakan ada masalah */
+            animation: pulse-red 2.5s infinite;
+        }
+
+        /* Definisikan animasi untuk denyut merah */
+        @keyframes pulse-red {
+            0% {
+                box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 16px rgba(239, 68, 68, 0.8);
+            }
+
+            100% {
+                box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+            }
+        }
+
+        @keyframes pulse-green {
             0% {
                 box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
             }
@@ -429,6 +586,20 @@
 
             100% {
                 box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+            }
+        }
+
+        @keyframes pulse-yellow {
+            0% {
+                box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 16px rgba(251, 191, 36, 0.8);
+            }
+
+            100% {
+                box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
             }
         }
 
