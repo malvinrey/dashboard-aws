@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ExportController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -24,3 +25,6 @@ Route::get('/log-data', [DashboardController::class, 'logData'])->name('log-data
 use App\Livewire\AnalysisChart;
 
 Route::get('/analysis', AnalysisChart::class);
+
+// Route untuk mengakses file export
+Route::get('/export/download/{filename}', [ExportController::class, 'download'])->name('export.download');

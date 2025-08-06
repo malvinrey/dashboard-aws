@@ -230,12 +230,83 @@ class ScadaDataService
     }
 
     /**
+     * Mengambil data log dengan filter tanggal, pencarian, dan pengurutan
+     */
+    public function getLogDataWithFilters(int $limit = 50, string $startDate = '', string $endDate = '', string $search = '', string $sortField = 'id', string $sortDirection = 'desc')
+    {
+        $query = ScadaDataWide::query();
+
+        // Apply date filters
+        if (!empty($startDate)) {
+            $query->whereDate('timestamp_device', '>=', $startDate);
+        }
+        if (!empty($endDate)) {
+            $query->whereDate('timestamp_device', '<=', $endDate);
+        }
+
+        // Apply search filter
+        if (!empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('id', 'LIKE', "%{$search}%")
+                    ->orWhere('nama_group', 'LIKE', "%{$search}%")
+                    ->orWhere('par_sensor', 'LIKE', "%{$search}%")
+                    ->orWhere('solar_radiation', 'LIKE', "%{$search}%")
+                    ->orWhere('wind_speed', 'LIKE', "%{$search}%")
+                    ->orWhere('wind_direction', 'LIKE', "%{$search}%")
+                    ->orWhere('temperature', 'LIKE', "%{$search}%")
+                    ->orWhere('humidity', 'LIKE', "%{$search}%")
+                    ->orWhere('pressure', 'LIKE', "%{$search}%")
+                    ->orWhere('rainfall', 'LIKE', "%{$search}%");
+            });
+        }
+
+        // Apply sorting
+        $query->orderBy($sortField, $sortDirection);
+
+        return $query->limit($limit)->get();
+    }
+
+    /**
      * Mengambil total jumlah records untuk pagination
      * Menghitung total records wide yang sebenarnya
      */
     public function getTotalRecords(): int
     {
         return ScadaDataWide::count();
+    }
+
+    /**
+     * Mengambil total jumlah records dengan filter untuk pagination
+     */
+    public function getTotalRecordsWithFilters(string $startDate = '', string $endDate = '', string $search = ''): int
+    {
+        $query = ScadaDataWide::query();
+
+        // Apply date filters
+        if (!empty($startDate)) {
+            $query->whereDate('timestamp_device', '>=', $startDate);
+        }
+        if (!empty($endDate)) {
+            $query->whereDate('timestamp_device', '<=', $endDate);
+        }
+
+        // Apply search filter
+        if (!empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('id', 'LIKE', "%{$search}%")
+                    ->orWhere('nama_group', 'LIKE', "%{$search}%")
+                    ->orWhere('par_sensor', 'LIKE', "%{$search}%")
+                    ->orWhere('solar_radiation', 'LIKE', "%{$search}%")
+                    ->orWhere('wind_speed', 'LIKE', "%{$search}%")
+                    ->orWhere('wind_direction', 'LIKE', "%{$search}%")
+                    ->orWhere('temperature', 'LIKE', "%{$search}%")
+                    ->orWhere('humidity', 'LIKE', "%{$search}%")
+                    ->orWhere('pressure', 'LIKE', "%{$search}%")
+                    ->orWhere('rainfall', 'LIKE', "%{$search}%");
+            });
+        }
+
+        return $query->count();
     }
 
     /**
