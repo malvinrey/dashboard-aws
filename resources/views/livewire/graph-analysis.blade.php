@@ -26,6 +26,9 @@
 
             // Mulai proses loading komponen secara berurutan
             this.loadComponentsSequentially();
+
+            // ✅ PERBAIKAN: Aktifkan fallback untuk historical data overlay
+            this.ensureHistoricalOverlayHidden();
         },
 
         // Load komponen secara berurutan dengan delay untuk memastikan semua siap
@@ -129,10 +132,48 @@
             // Force hide overlay setelah 10 detik sebagai fallback
             setTimeout(() => {
                 if (document.getElementById('main-loading-overlay')) {
-                    console.log('⚠️ Force hiding overlay after timeout');
+                    console.log('⚠️ Force hiding main overlay after timeout');
                     this.hideMainLoadingOverlay();
                 }
             }, 10000);
+        },
+
+        // ✅ PERBAIKAN: Fungsi untuk menyembunyikan overlay loading historical data
+        hideHistoricalDataOverlay() {
+            console.log('🔄 Hiding historical data loading overlay...');
+
+            // Cari semua overlay loading yang aktif untuk historical data
+            const historicalOverlays = document.querySelectorAll('.loading-overlay[wire\\:loading]');
+
+            historicalOverlays.forEach(overlay => {
+                if (overlay.style.display === 'flex' || overlay.style.display === '') {
+                    console.log('✅ Hiding historical data overlay');
+                    overlay.style.display = 'none';
+
+                    // Tambahkan animasi fade out
+                    overlay.style.opacity = '0';
+                    overlay.style.transition = 'opacity 0.3s ease-out';
+
+                    // Remove overlay setelah animasi selesai
+                    setTimeout(() => {
+                        if (overlay.parentNode) {
+                            overlay.style.display = 'none';
+                        }
+                    }, 300);
+                }
+            });
+        },
+
+        // ✅ PERBAIKAN: Fallback untuk memastikan overlay historical data tidak stuck
+        ensureHistoricalOverlayHidden() {
+            // Force hide overlay historical data setelah 15 detik sebagai fallback
+            setTimeout(() => {
+                const historicalOverlays = document.querySelectorAll('.loading-overlay[wire\\:loading]');
+                if (historicalOverlays.length > 0) {
+                    console.log('⚠️ Force hiding historical data overlay after timeout');
+                    this.hideHistoricalDataOverlay();
+                }
+            }, 15000);
         },
 
         // Setup all event listeners
@@ -141,6 +182,25 @@
             document.addEventListener('chart-data-updated', (event) => {
                 console.log('chart-data-updated event received:', event.detail);
                 this.handleChartDataUpdated(event.detail);
+            });
+
+            // ✅ PERBAIKAN: Event listener untuk Livewire loading events
+            document.addEventListener('livewire:loading', (event) => {
+                console.log('🔄 Livewire loading started:', event.detail);
+            });
+
+            document.addEventListener('livewire:loaded', (event) => {
+                console.log('✅ Livewire loading completed:', event.detail);
+
+                // Sembunyikan overlay loading historical data jika ada
+                this.hideHistoricalDataOverlay();
+            });
+
+            document.addEventListener('livewire:error', (event) => {
+                console.error('❌ Livewire error occurred:', event.detail);
+
+                // Sembunyikan overlay loading historical data meskipun ada error
+                this.hideHistoricalDataOverlay();
             });
 
             // Historical data prepended event
@@ -488,7 +548,10 @@
 
     {{-- Overlay loading untuk aksi berat seperti loadChartData --}}
     <div class="loading-overlay" wire:loading.flex wire:target="loadChartData, loadMoreSeconds">
-        <div class="spinner"></div>
+        <div class="loading-content-historical">
+            <div class="spinner"></div>
+            <p class="loading-text-historical">Loading Historical Data...</p>
+        </div>
     </div>
 
     {{-- Bagian Filter --}}
@@ -580,6 +643,7 @@
                 // 6. Setelah semua state di-set, panggil method utama untuk memuat chart
                 @this.call('setHistoricalModeAndLoad').then((result) => {
                     console.log('setHistoricalModeAndLoad completed:', result);
+
                     // Reset tombol setelah selesai
                     loadButton.textContent = originalText;
                     loadButton.disabled = false;
@@ -588,8 +652,27 @@
                     // Tambahkan log untuk debugging
                     console.log('Historical data load completed successfully');
 
+                    // ✅ PERBAIKAN: Sembunyikan overlay loading setelah data historis selesai
+                    // Gunakan arrow function untuk mempertahankan konteks this
+                    const alpineElement = document.querySelector('[x-data]');
+
+                    // Periksa apakah elemennya ada DAN properti internal Alpine ada
+                    if (alpineElement && alpineElement.__x) {
+                        const alpineComponent = alpineElement.__x.$data;
+
+                        // Periksa apakah metodenya ada sebelum memanggil
+                        if (alpineComponent && typeof alpineComponent.hideHistoricalDataOverlay === 'function') {
+                            alpineComponent.hideHistoricalDataOverlay();
+                        } else {
+                            console.warn('Metode hideHistoricalDataOverlay() tidak ditemukan pada komponen Alpine.');
+                        }
+                    } else {
+                        console.warn('Komponen Alpine [x-data] tidak ditemukan di DOM. Mungkin karena race condition setelah error.');
+                    }
+
                 }).catch((error) => {
                     console.error('setHistoricalModeAndLoad failed:', error);
+
                     // Reset tombol jika terjadi error
                     loadButton.textContent = originalText;
                     loadButton.disabled = false;
@@ -600,6 +683,24 @@
                     setTimeout(() => {
                         loadButton.style.animation = '';
                     }, 500);
+
+                    // ✅ PERBAIKAN: Sembunyikan overlay loading meskipun ada error
+                    // Gunakan arrow function untuk mempertahankan konteks this
+                    const alpineElement = document.querySelector('[x-data]');
+
+                    // Periksa apakah elemennya ada DAN properti internal Alpine ada
+                    if (alpineElement && alpineElement.__x) {
+                        const alpineComponent = alpineElement.__x.$data;
+
+                        // Periksa apakah metodenya ada sebelum memanggil
+                        if (alpineComponent && typeof alpineComponent.hideHistoricalDataOverlay === 'function') {
+                            alpineComponent.hideHistoricalDataOverlay();
+                        } else {
+                            console.warn('Metode hideHistoricalDataOverlay() tidak ditemukan pada komponen Alpine.');
+                        }
+                    } else {
+                        console.warn('Komponen Alpine [x-data] tidak ditemukan di DOM. Mungkin karena race condition setelah error.');
+                    }
                 });
             "
                 class="btn-primary">Load Historical Data</button>
@@ -748,6 +849,52 @@
                 opacity: 1;
             }
         }
+
+        /* ✅ PERBAIKAN: CSS untuk overlay loading historical data */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(3px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9998;
+            transition: opacity 0.3s ease-out;
+        }
+
+        .loading-overlay[wire\\:loading] {
+            display: flex;
+        }
+
+        .loading-content-historical {
+            text-align: center;
+            padding: 1.5rem;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+        }
+
+        .loading-text-historical {
+            font-size: 1rem;
+            font-weight: 500;
+            color: #374151;
+            margin: 0.75rem 0 0 0;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
     </style>
 
     @script
@@ -755,6 +902,8 @@
             // TAMBAHKAN DUA BARIS INI - BUAT GLOBAL
             window.lastSuccessfulPollTimestamp = Date.now();
             window.connectionCheckInterval = null;
+
+
 
             document.addEventListener('livewire:navigated', () => {
                 console.log('🚀 Livewire navigated event triggered');
@@ -869,6 +1018,43 @@
                 // Event listener untuk memastikan semua komponen siap
                 document.addEventListener('DOMContentLoaded', () => {
                     console.log('🌐 DOM content loaded');
+                });
+
+                // ✅ PERBAIKAN: Event listener untuk loadMoreSeconds
+                document.addEventListener('livewire:loading', (event) => {
+                    if (event.detail && event.detail.target && event.detail.target.includes(
+                            'loadMoreSeconds')) {
+                        console.log('🔄 LoadMoreSeconds loading started');
+                    }
+                });
+
+                document.addEventListener('livewire:loaded', (event) => {
+                    if (event.detail && event.detail.target && event.detail.target.includes(
+                            'loadMoreSeconds')) {
+                        console.log('✅ LoadMoreSeconds loading completed');
+                        // Sembunyikan overlay loading untuk loadMoreSeconds
+                        // Gunakan arrow function untuk mempertahankan konteks this
+                        const alpineElement = document.querySelector('[x-data]');
+
+                        // Periksa apakah elemennya ada DAN properti internal Alpine ada
+                        if (alpineElement && alpineElement.__x) {
+                            const alpineComponent = alpineElement.__x.$data;
+
+                            // Periksa apakah metodenya ada sebelum memanggil
+                            if (alpineComponent && typeof alpineComponent.hideHistoricalDataOverlay ===
+                                'function') {
+                                alpineComponent.hideHistoricalDataOverlay();
+                            } else {
+                                console.warn(
+                                    'Metode hideHistoricalDataOverlay() tidak ditemukan pada komponen Alpine.'
+                                );
+                            }
+                        } else {
+                            console.warn(
+                                'Komponen Alpine [x-data] tidak ditemukan di DOM. Mungkin karena race condition setelah error.'
+                            );
+                        }
+                    }
                 });
 
                 // Event listener untuk menangani error state
