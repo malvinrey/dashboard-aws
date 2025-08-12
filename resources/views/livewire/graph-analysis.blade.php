@@ -1,10 +1,492 @@
-<div>
+@php
+    // Logika untuk menentukan tanggal default
+    $endDate = now()->toDateTimeString();
+    $startDate = now()->subDay()->toDateTimeString();
+@endphp
+
+<div data-selected-tags="{{ json_encode($selectedTags) }}" data-interval="{{ $interval }}"
+    data-realtime-enabled="{{ $realtimeEnabled ? 'true' : 'false' }}" {{-- Alpine.js component untuk mengelola state dan logic --}} {{-- SOLUSI DEFINITIF: Menggunakan Web Worker untuk koneksi SSE yang stabil --}}
+    {{-- Koneksi SSE akan tetap aktif bahkan saat tab tidak terlihat --}} x-data="{
+        // State variables untuk Web Worker
+        sseWorker: null, // Instance Web Worker untuk SSE
+        sseConnectionStatus: 'disconnected', // Status koneksi SSE
+        lastSuccessfulPollTimestamp: Date.now(), // Timestamp polling terakhir
+        connectionCheckInterval: null, // Interval untuk cek koneksi
+        lastKnownTimestamp: null, // Timestamp data terakhir
+
+        // Initialize component
+        initComponent() {
+            console.log('Initializing Alpine component...');
+
+            // Tambahkan class loading ke body untuk mencegah scroll
+            document.body.classList.add('loading');
+
+            // Setup event listeners
+            this.setupEventListeners();
+
+            // Mulai proses loading komponen secara berurutan
+            this.loadComponentsSequentially();
+        },
+
+        // Load komponen secara berurutan dengan delay untuk memastikan semua siap
+        async loadComponentsSequentially() {
+            try {
+                console.log('🔄 Starting sequential component loading...');
+
+                // Aktifkan fallback untuk memastikan overlay tidak stuck
+                this.ensureOverlayHidden();
+
+                // Step 1: Setup SSE connection
+                await this.delay(500);
+                this.startSseConnection();
+                console.log('✅ SSE connection setup completed');
+
+                // Step 2: Start connection checker
+                await this.delay(300);
+                this.startConnectionChecker();
+                console.log('✅ Connection checker started');
+
+                // Step 3: Wait for Select2 to be ready
+                await this.waitForSelect2();
+                console.log('✅ Select2 initialization completed');
+
+                // Step 4: Wait for interval buttons to be ready
+                await this.waitForIntervalButtons();
+                console.log('✅ Interval buttons setup completed');
+
+                // Step 5: Dispatch loadChartData event
+                await this.delay(200);
+                window.Livewire.dispatch('loadChartData');
+                console.log('✅ Chart data loading initiated');
+
+                // Step 6: Final delay untuk memastikan semua komponen benar-benar siap
+                await this.delay(500);
+
+                // Hide loading overlay
+                this.hideMainLoadingOverlay();
+                console.log('🎉 All components loaded successfully!');
+
+            } catch (error) {
+                console.error('❌ Error during component loading:', error);
+                // Tetap hide overlay meskipun ada error
+                this.hideMainLoadingOverlay();
+            }
+        },
+
+        // Utility function untuk delay
+        delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        },
+
+        // Wait for Select2 to be ready
+        waitForSelect2() {
+            return new Promise((resolve) => {
+                const checkSelect2 = () => {
+                    if (typeof $ !== 'undefined' && $('#metrics-select2').length > 0) {
+                        resolve();
+                    } else {
+                        setTimeout(checkSelect2, 100);
+                    }
+                };
+                checkSelect2();
+            });
+        },
+
+        // Wait for interval buttons to be ready
+        waitForIntervalButtons() {
+            return new Promise((resolve) => {
+                const checkButtons = () => {
+                    const buttons = document.getElementById('interval-buttons');
+                    if (buttons && buttons.querySelectorAll('button').length > 0) {
+                        resolve();
+                    } else {
+                        setTimeout(checkButtons, 100);
+                    }
+                };
+                checkButtons();
+            });
+        },
+
+        // Hide main loading overlay
+        hideMainLoadingOverlay() {
+            const overlay = document.getElementById('main-loading-overlay');
+            if (overlay) {
+                overlay.classList.add('hidden');
+                // Remove loading class from body
+                document.body.classList.remove('loading');
+
+                // Remove overlay completely after animation
+                setTimeout(() => {
+                    if (overlay.parentNode) {
+                        overlay.parentNode.removeChild(overlay);
+                    }
+                }, 300);
+            }
+        },
+
+        // Fallback untuk memastikan overlay loading selalu berfungsi
+        ensureOverlayHidden() {
+            // Force hide overlay setelah 10 detik sebagai fallback
+            setTimeout(() => {
+                if (document.getElementById('main-loading-overlay')) {
+                    console.log('⚠️ Force hiding overlay after timeout');
+                    this.hideMainLoadingOverlay();
+                }
+            }, 10000);
+        },
+
+        // Setup all event listeners
+        setupEventListeners() {
+            // Chart data updated event
+            document.addEventListener('chart-data-updated', (event) => {
+                console.log('chart-data-updated event received:', event.detail);
+                this.handleChartDataUpdated(event.detail);
+            });
+
+            // Historical data prepended event
+            document.addEventListener('historical-data-prepended-second', (event) => {
+                this.handleHistoricalDataPrepended(event.detail);
+            });
+
+            // Show warning event
+            document.addEventListener('show-warning', (event) => {
+                this.showWarning(event.detail.message);
+            });
+
+            // Update last point event
+            document.addEventListener('update-last-point', (event) => {
+                console.log('Update last point event received:', event.detail);
+                this.handleChartUpdate(event.detail.data);
+            });
+
+            // Realtime toggle change
+            const realtimeToggle = document.getElementById('realtime-toggle');
+            if (realtimeToggle) {
+                realtimeToggle.addEventListener('change', (event) => {
+                    console.log('Realtime toggle changed:', event.target.checked);
+                    if (event.target.checked) {
+                        this.lastSuccessfulPollTimestamp = Date.now();
+                        this.startSseConnection();
+                    } else {
+                        if (this.sseWorker) {
+                            this.sseWorker.terminate();
+                            this.sseWorker = null;
+                            console.log('SSE Worker stopped');
+                        }
+                    }
+                });
+            }
+
+            // Chart data updated - restart SSE
+            document.addEventListener('chart-data-updated', () => {
+                console.log('Chart data updated, restarting SSE...');
+                this.startSseConnection();
+            });
+        },
+
+        // Handle chart data updated
+        handleChartDataUpdated(chartData) {
+            const warningBox = document.getElementById('chart-warning');
+            if (warningBox) warningBox.style.display = 'none';
+
+            if (chartData && chartData.data && chartData.data.length > 0) {
+                console.log('Rendering chart with data:', chartData);
+                const plotlyData = chartData.data.map(trace => ({
+                    ...trace,
+                    x: trace.x.map(dateStr => new Date(dateStr)),
+                }));
+                this.renderChart(plotlyData, chartData.layout);
+                this.updateLastKnownTimestamp();
+                console.log('Chart rendered successfully');
+            } else {
+                console.log('No chart data available, rendering empty chart');
+                this.renderChart([], {
+                    title: 'No data to display. Please check filters.'
+                });
+                this.updateLastKnownTimestamp();
+            }
+        },
+
+        // Handle historical data prepended
+        handleHistoricalDataPrepended(chartData) {
+            const plotlyChart = document.getElementById('plotlyChart');
+            if (chartData && chartData.data && chartData.data.length > 0 && plotlyChart && plotlyChart.data) {
+                chartData.data.forEach((newTrace, traceIndex) => {
+                    if (traceIndex < plotlyChart.data.length) {
+                        const newDates = newTrace.x.map(dateStr => new Date(dateStr));
+                        if (newDates.length > 0) {
+                            Plotly.prependTraces('plotlyChart', {
+                                x: [newDates],
+                                y: [newTrace.y]
+                            }, [traceIndex]);
+                        }
+                    }
+                });
+            }
+        },
+
+        // Show warning
+        showWarning(message) {
+            const warningBox = document.getElementById('chart-warning');
+            const warningMessage = document.getElementById('warning-message');
+            if (warningBox && warningMessage) {
+                warningMessage.textContent = message;
+                warningBox.style.display = 'block';
+            }
+        },
+
+        // Render chart using Plotly
+        renderChart(plotlyData, layout) {
+            console.log('renderChart called with:', { plotlyData, layout });
+            const chartContainer = document.getElementById('plotlyChart');
+            if (!chartContainer) {
+                console.error('Chart container not found!');
+                return;
+            }
+            console.log('Chart container found, rendering with Plotly...');
+            Plotly.react('plotlyChart', plotlyData, layout, {
+                responsive: true,
+                displaylogo: false
+            });
+            console.log('Plotly.react completed');
+        },
+
+        // Update last known timestamp
+        updateLastKnownTimestamp() {
+            const plotlyChart = document.getElementById('plotlyChart');
+            if (plotlyChart && plotlyChart.data && plotlyChart.data.length > 0) {
+                let maxTimestamp = 0;
+                plotlyChart.data.forEach(trace => {
+                    if (trace.x && trace.x.length > 0) {
+                        const lastTimestampInTrace = new Date(trace.x[trace.x.length - 1]).getTime();
+                        if (lastTimestampInTrace > maxTimestamp) {
+                            maxTimestamp = lastTimestampInTrace;
+                        }
+                    }
+                });
+                if (maxTimestamp > 0) {
+                    const lastDate = new Date(maxTimestamp);
+                    this.lastKnownTimestamp = lastDate.toISOString().slice(0, 19).replace('T', ' ');
+                } else {
+                    this.lastKnownTimestamp = null;
+                }
+            } else {
+                this.lastKnownTimestamp = null;
+            }
+        },
+
+        // Start SSE connection using Web Worker
+        startSseConnection() {
+            console.log('Starting SSE connection using Web Worker...');
+
+            // Hentikan worker lama jika ada untuk mencegah duplikasi
+            if (this.sseWorker) {
+                this.sseWorker.terminate();
+                this.sseWorker = null;
+            }
+
+            const container = document.querySelector('[data-selected-tags]');
+            const selectedTags = container ? JSON.parse(container.dataset.selectedTags || '[]') : [];
+            const interval = container ? container.dataset.interval || 'hour' : 'hour';
+            const realtimeToggle = document.getElementById('realtime-toggle');
+
+            if (!selectedTags || selectedTags.length === 0 || !realtimeToggle || !realtimeToggle.checked) {
+                console.log('SSE connection skipped - conditions not met');
+                return;
+            }
+
+            const params = new URLSearchParams({ interval: interval });
+            selectedTags.forEach(tag => params.append('tags[]', tag));
+            const sseUrl = `/api/sse/stream?${params.toString()}`;
+
+            try {
+                // Buat instance worker baru dari file eksternal
+                this.sseWorker = new Worker('/js/sse-worker.js');
+                const statusDot = document.querySelector('.realtime-status-dot');
+
+                // Dengarkan pesan yang dikirim KEMBALI DARI WORKER
+                this.sseWorker.onmessage = (e) => {
+                    console.log('SSE Worker message received:', e.data);
+                    this.handleWorkerMessage(e.data, statusDot);
+                };
+
+                this.sseWorker.onerror = (error) => {
+                    console.error('SSE Worker error:', error);
+                    statusDot?.classList.add('stale');
+                    this.sseConnectionStatus = 'error';
+                };
+
+                // Kirim URL SSE ke worker agar ia bisa memulai koneksi
+                this.sseWorker.postMessage({
+                    type: 'start',
+                    url: sseUrl,
+                    tags: selectedTags,
+                    interval: interval
+                });
+
+                console.log('SSE Worker started successfully with URL:', sseUrl);
+
+            } catch (error) {
+                console.error('Failed to create SSE Worker:', error);
+                const statusDot = document.querySelector('.realtime-status-dot');
+                statusDot?.classList.add('stale');
+                this.sseConnectionStatus = 'error';
+            }
+        },
+
+        // Handle worker messages
+        handleWorkerMessage(data, statusDot) {
+            console.log('Processing worker message:', data.type, data);
+
+            switch (data.type) {
+                case 'status':
+                    if (data.status === 'connected') {
+                        this.sseConnectionStatus = 'connected';
+                        statusDot?.classList.remove('stale');
+                        statusDot?.classList.add('connected');
+                        console.log('✅ SSE connection established via Worker');
+                    } else if (data.status === 'stopped') {
+                        this.sseConnectionStatus = 'stopped';
+                        statusDot?.classList.remove('connected');
+                        console.log('⏹️ SSE connection stopped via Worker');
+                    }
+                    break;
+
+                case 'data':
+                    window.lastSuccessfulPollTimestamp = Date.now();
+                    console.log('📊 Real-time data received via Worker:', data.data);
+                    this.handleChartUpdate(data.data);
+                    break;
+
+                case 'connected':
+                    console.log('🔗 SSE connected event via Worker:', data.data);
+                    break;
+
+                case 'heartbeat':
+                    console.log('💓 SSE heartbeat received via Worker');
+                    window.lastSuccessfulPollTimestamp = Date.now();
+                    break;
+
+                case 'error':
+                    console.error('❌ SSE error via Worker:', data.error);
+                    statusDot?.classList.add('stale');
+                    this.sseConnectionStatus = 'error';
+                    break;
+
+                default:
+                    console.log('⚠️ Unknown worker message type:', data.type);
+                    break;
+            }
+        },
+
+        // Handle chart updates
+        handleChartUpdate(newData) {
+            if (!newData || !newData.metrics || !newData.timestamp) {
+                console.log('Invalid data format received by handleChartUpdate:', newData);
+                return;
+            }
+
+            const plotlyChart = document.getElementById('plotlyChart');
+            if (!plotlyChart || !plotlyChart.data || plotlyChart.data.length === 0) {
+                console.log('No chart data available in handleChartUpdate');
+                return;
+            }
+
+            console.log('handleChartUpdate processing data:', newData);
+            const newPointTimestamp = new Date(newData.timestamp);
+            let needsRedraw = false;
+
+            Object.entries(newData.metrics).forEach(([metricName, newValue]) => {
+                const formattedMetricName = metricName.charAt(0).toUpperCase() + metricName.slice(1).replace(/_/g, ' ');
+                const traceIndex = plotlyChart.data.findIndex(trace => trace.name === formattedMetricName);
+
+                if (traceIndex !== -1) {
+                    const currentTrace = plotlyChart.data[traceIndex];
+                    if (!currentTrace.x || currentTrace.x.length === 0) {
+                        console.log(`Trace ${formattedMetricName} is empty, skipping`);
+                        return;
+                    }
+
+                    const lastIndex = currentTrace.x.length - 1;
+                    const lastValue = currentTrace.y[lastIndex];
+
+                    if (lastValue === null) {
+                        currentTrace.x[lastIndex] = newPointTimestamp;
+                        currentTrace.y[lastIndex] = newValue;
+                        needsRedraw = true;
+                        console.log(`Resumed line for ${formattedMetricName} after gap.`);
+                    } else {
+                        const lastChartTimestamp = new Date(currentTrace.x[lastIndex]);
+
+                        if (newPointTimestamp.getTime() === lastChartTimestamp.getTime()) {
+                            currentTrace.y[lastIndex] = newValue;
+                            needsRedraw = true;
+                            console.log(`Updated existing point for ${formattedMetricName}`);
+                        } else if (newPointTimestamp.getTime() > lastChartTimestamp.getTime()) {
+                            Plotly.extendTraces('plotlyChart', {
+                                x: [
+                                    [newPointTimestamp]
+                                ],
+                                y: [
+                                    [newValue]
+                                ]
+                            }, [traceIndex], 60); // MAX_POINTS_PER_TRACE = 60
+                            console.log(`Added new point for ${formattedMetricName}`);
+                        }
+                    }
+                } else {
+                    console.log(`Trace not found for metric: ${formattedMetricName}`);
+                }
+            });
+
+            if (needsRedraw) {
+                Plotly.redraw('plotlyChart');
+                console.log('Chart redrawn');
+            }
+            this.updateLastKnownTimestamp();
+        },
+
+        // Start connection checker
+        startConnectionChecker() {
+            if (this.connectionCheckInterval) {
+                clearInterval(this.connectionCheckInterval);
+            }
+
+            this.connectionCheckInterval = setInterval(() => {
+                const realtimeToggle = document.getElementById('realtime-toggle');
+                const statusDot = document.querySelector('.realtime-status-dot');
+
+                if (!realtimeToggle || !realtimeToggle.checked || !statusDot) {
+                    statusDot?.classList.remove('stale');
+                    return;
+                }
+
+                const secondsSinceLastPoll = (Date.now() - this.lastSuccessfulPollTimestamp) / 1000;
+                const STALE_THRESHOLD_SECONDS = 15;
+
+                if (secondsSinceLastPoll > STALE_THRESHOLD_SECONDS) {
+                    statusDot.classList.add('stale');
+                } else {
+                    statusDot.classList.remove('stale');
+                }
+            }, 2000);
+        }
+    }" {{-- Initialize component when Alpine is ready --}} x-init="initComponent()">
     {{-- Indikator loading real-time yang tidak mengganggu dari wire:poll --}}
     <div title="{{ $realtimeEnabled ? 'Real-time updates active' : 'Real-time updates disabled' }}"
         class="realtime-status-dot {{ $realtimeEnabled ? 'connected' : 'disconnected' }}">
     </div>
 
-    {{-- Overlay loading ini HANYA akan aktif untuk aksi berat seperti loadChartData --}}
+    {{-- Overlay loading utama yang menutupi seluruh halaman hingga semua komponen terload --}}
+    <div id="main-loading-overlay" class="main-loading-overlay">
+        <div class="loading-content">
+            <div class="spinner-large"></div>
+            <p class="loading-text">Loading Graph Analysis...</p>
+            <p class="loading-subtext">Please wait while all components are being initialized</p>
+        </div>
+    </div>
+
+    {{-- Overlay loading untuk aksi berat seperti loadChartData --}}
     <div class="loading-overlay" wire:loading.flex wire:target="loadChartData, loadMoreSeconds">
         <div class="spinner"></div>
     </div>
@@ -96,14 +578,18 @@
                 }
 
                 // 6. Setelah semua state di-set, panggil method utama untuk memuat chart
-                @this.call('setHistoricalModeAndLoad').then(() => {
+                @this.call('setHistoricalModeAndLoad').then((result) => {
+                    console.log('setHistoricalModeAndLoad completed:', result);
                     // Reset tombol setelah selesai
                     loadButton.textContent = originalText;
                     loadButton.disabled = false;
                     loadButton.style.opacity = '1';
 
+                    // Tambahkan log untuk debugging
+                    console.log('Historical data load completed successfully');
 
-                }).catch(() => {
+                }).catch((error) => {
+                    console.error('setHistoricalModeAndLoad failed:', error);
                     // Reset tombol jika terjadi error
                     loadButton.textContent = originalText;
                     loadButton.disabled = false;
@@ -151,6 +637,119 @@
         @endif
     </div>
 
+    <style>
+        /* Overlay loading utama yang menutupi seluruh halaman */
+        .main-loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(5px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: opacity 0.3s ease-out;
+        }
+
+        .main-loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loading-content {
+            text-align: center;
+            padding: 2rem;
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+        }
+
+        .spinner-large {
+            width: 60px;
+            height: 60px;
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        .loading-text {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1f2937;
+            margin: 0 0 0.5rem 0;
+        }
+
+        .loading-subtext {
+            font-size: 0.875rem;
+            color: #6b7280;
+            margin: 0;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Pastikan overlay loading tidak bisa di-scroll */
+        body.loading {
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+        }
+
+        /* Responsive design untuk overlay loading */
+        @media (max-width: 768px) {
+            .loading-content {
+                padding: 1.5rem;
+                margin: 1rem;
+            }
+
+            .spinner-large {
+                width: 50px;
+                height: 50px;
+            }
+
+            .loading-text {
+                font-size: 1.1rem;
+            }
+
+            .loading-subtext {
+                font-size: 0.8rem;
+            }
+        }
+
+        /* Pastikan overlay loading selalu di atas semua elemen */
+        .main-loading-overlay {
+            z-index: 99999 !important;
+        }
+
+        /* Animasi fade in untuk overlay */
+        .main-loading-overlay {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+    </style>
+
     @script
         <script>
             // TAMBAHKAN DUA BARIS INI - BUAT GLOBAL
@@ -158,6 +757,7 @@
             window.connectionCheckInterval = null;
 
             document.addEventListener('livewire:navigated', () => {
+                console.log('🚀 Livewire navigated event triggered');
 
                 // Optimistic Update untuk Interval Buttons (tanpa komunikasi ke server)
                 let isProcessingInterval = false;
@@ -182,8 +782,6 @@
                             });
                             clickedButton.classList.add('active');
 
-
-
                             // Reset flag setelah delay untuk mencegah multiple clicks
                             setTimeout(() => {
                                 isProcessingInterval = false;
@@ -199,6 +797,7 @@
                     dropdownAutoWidth: false,
                     dropdownParent: $('body')
                 });
+                console.log('✅ Select2 initialized successfully');
 
                 // Pasang event listener 'change' dari Select2
                 $('#metrics-select2').on('change', function(e) {
@@ -251,383 +850,36 @@
                     }
                 };
 
-                document.addEventListener('visibilitychange', () => {
-                    // Hanya berjalan saat tab kembali terlihat
-                    if (document.visibilityState === 'visible') {
-                        const plotlyChart = document.getElementById('plotlyChart');
-                        const realtimeToggle = document.getElementById('realtime-toggle');
+                // HAPUS SEMUA KODE visibilitychange yang bermasalah
+                // Web Worker akan menangani koneksi SSE secara independen
+                // tanpa terpengaruh oleh perubahan visibilitas tab
 
-                        // Pastikan semua kondisi terpenuhi untuk melanjutkan
-                        if (!plotlyChart || !plotlyChart.data || !realtimeToggle || !realtimeToggle.checked || !
-                            globalState.lastKnownTimestamp) {
-                            return;
-                        }
-
-                        const now = new Date();
-                        const lastKnown = new Date(globalState.lastKnownTimestamp);
-                        const gapInSeconds = (now - lastKnown) / 1000;
-
-                        // Jika jeda waktu lebih dari 15 detik, buat jeda visual di grafik
-                        if (gapInSeconds > 15) {
-                            console.log(
-                                `Gap of ${gapInSeconds.toFixed(1)}s detected. Inserting break in chart.`);
-
-                            // Buat timestamp untuk jeda, sedikit setelah titik terakhir yang diketahui
-                            const breakTimestamp = new Date(lastKnown.getTime() + 1000);
-
-                            // Siapkan update untuk SEMUA trace yang ada di grafik
-                            const traceIndices = plotlyChart.data.map((_, i) => i);
-                            const updateX = traceIndices.map(() => [breakTimestamp]);
-                            const updateY = traceIndices.map(() => [null]); // Inilah kuncinya
-
-                            // Masukkan titik 'null' ke semua trace untuk menciptakan jeda
-                            Plotly.extendTraces('plotlyChart', {
-                                x: updateX,
-                                y: updateY
-                            }, traceIndices);
-
-                            console.log('Break inserted in chart for all traces');
-                        }
-                    }
-                });
-
-                const renderChart = (plotlyData, layout) => {
-                    Plotly.react('plotlyChart', plotlyData, layout, {
-                        responsive: true,
-                        displaylogo: false
-                    });
-                };
-
-                document.addEventListener('chart-data-updated', event => {
-                    warningBox.style.display = 'none';
-                    const chartData = event.detail.chartData;
-                    if (chartData && chartData.data && chartData.data.length > 0) {
-                        const plotlyData = chartData.data.map(trace => ({
-                            ...trace,
-                            x: trace.x.map(dateStr => new Date(dateStr)),
-                        }));
-                        renderChart(plotlyData, chartData.layout);
-                        updateLastKnownTimestamp();
-                    } else {
-                        renderChart([], {
-                            title: 'No data to display. Please check filters.'
-                        });
-                        globalState.lastKnownTimestamp = null;
-                    }
-                });
-
-                document.addEventListener('historical-data-prepended-second', event => {
-                    const chartData = event.detail.data;
-                    const plotlyChart = document.getElementById('plotlyChart');
-                    if (chartData && chartData.data && chartData.data.length > 0 && plotlyChart && plotlyChart
-                        .data) {
-                        chartData.data.forEach((newTrace, traceIndex) => {
-                            if (traceIndex < plotlyChart.data.length) {
-                                const newDates = newTrace.x.map(dateStr => new Date(dateStr));
-                                if (newDates.length > 0) {
-                                    Plotly.prependTraces('plotlyChart', {
-                                        x: [newDates],
-                                        y: [newTrace.y]
-                                    }, [traceIndex]);
-                                }
-                            }
-                        });
-                    }
-                });
-
-                document.addEventListener('show-warning', event => {
-                    warningMessage.textContent = event.detail.message;
-                    warningBox.style.display = 'block';
-                });
-
-                // Fungsi untuk handle chart update secara langsung (tanpa event bus)
-                function handleChartUpdate(newData) {
-                    if (!newData || !newData.metrics || !newData.timestamp) {
-                        console.log('Invalid data format received by handleChartUpdate:', newData);
-                        return;
-                    }
-
-                    const plotlyChart = document.getElementById('plotlyChart');
-                    if (!plotlyChart || !plotlyChart.data || plotlyChart.data.length === 0) {
-                        console.log('No chart data available in handleChartUpdate');
-                        return;
-                    }
-
-                    console.log('handleChartUpdate processing data:', newData);
-                    const newPointTimestamp = new Date(newData.timestamp);
-                    let needsRedraw = false;
-
-                    Object.entries(newData.metrics).forEach(([metricName, newValue]) => {
-                        // KUNCI PERBAIKAN:
-                        // Ubah nama metrik mentah (misal: "par_sensor") menjadi format yang ada di legenda grafik (misal: "Par sensor")
-                        // Ini untuk mencocokkan logika `ucfirst(str_replace('_', ' ', $tag))` di PHP.
-                        const formattedMetricName = metricName.charAt(0).toUpperCase() + metricName.slice(1)
-                            .replace(/_/g, ' ');
-
-                        // Lakukan pencarian menggunakan nama yang sudah diformat
-                        const traceIndex = plotlyChart.data.findIndex(trace => trace.name ===
-                            formattedMetricName);
-
-                        if (traceIndex !== -1) {
-                            const currentTrace = plotlyChart.data[traceIndex];
-                            if (!currentTrace.x || currentTrace.x.length === 0) {
-                                console.log(`Trace ${formattedMetricName} is empty, skipping`);
-                                return; // Lewati jika trace kosong
-                            }
-
-                            const lastIndex = currentTrace.x.length - 1;
-                            const lastValue = currentTrace.y[lastIndex];
-
-                            if (lastValue === null) {
-                                // Jika titik terakhir adalah 'null' (ada jeda), ganti dengan data baru
-                                currentTrace.x[lastIndex] = newPointTimestamp;
-                                currentTrace.y[lastIndex] = newValue;
-                                needsRedraw = true;
-                                console.log(`Resumed line for ${formattedMetricName} after gap.`);
-                            } else {
-                                const lastChartTimestamp = new Date(currentTrace.x[lastIndex]);
-
-                                if (newPointTimestamp.getTime() === lastChartTimestamp.getTime()) {
-                                    // Update titik yang sudah ada
-                                    currentTrace.y[lastIndex] = newValue;
-                                    needsRedraw = true;
-                                    console.log(`Updated existing point for ${formattedMetricName}`);
-                                } else if (newPointTimestamp.getTime() > lastChartTimestamp.getTime()) {
-                                    // Tambahkan titik baru
-                                    Plotly.extendTraces('plotlyChart', {
-                                        x: [
-                                            [newPointTimestamp]
-                                        ],
-                                        y: [
-                                            [newValue]
-                                        ]
-                                    }, [traceIndex]);
-                                    console.log(`Added new point for ${formattedMetricName}`);
-                                }
-                            }
-                        } else {
-                            // Log ini sekarang akan menggunakan nama yang sudah diformat agar lebih jelas
-                            console.log(`Trace not found for metric: ${formattedMetricName}`);
-                        }
-                    });
-
-                    if (needsRedraw) {
-                        Plotly.redraw('plotlyChart');
-                        console.log('Chart redrawn');
-                    }
-                    updateLastKnownTimestamp();
-                }
-
-                // Event listener untuk update chart dari API polling (simplified)
-                document.addEventListener('update-last-point', event => {
-                    console.log('Update last point event received:', event.detail);
-                    handleChartUpdate(event.detail.data);
-                });
-
-                // HAPUS listener 'append-new-points' yang lebih berat
-
-                // HAPUS listener 'append-missed-points' - SUDAH TIDAK DIPERLUKAN
-                // Gap sekarang dibuat langsung di visibilitychange listener
-
-                // SSE Connection untuk data real-time (menggantikan polling API)
-                let sseConnection = null;
-                let sseReconnectAttempts = 0;
-                const MAX_RECONNECT_ATTEMPTS = 5;
-
-                function startSseConnection() {
-                    console.log('Starting SSE connection...');
-
-                    // Hentikan koneksi lama jika ada
-                    if (sseConnection) {
-                        sseConnection.close();
-                        sseConnection = null;
-                    }
-
-                    const selectedTags = @this.get('selectedTags');
-                    const interval = @this.get('interval');
-                    const realtimeToggle = document.getElementById('realtime-toggle');
-
-                    if (!selectedTags || selectedTags.length === 0 || !realtimeToggle || !realtimeToggle.checked) {
-                        console.log('SSE connection skipped - conditions not met');
-                        return;
-                    }
-
-                    const params = new URLSearchParams({
-                        interval: interval
-                    });
-                    selectedTags.forEach(tag => params.append('tags[]', tag));
-
-                    const sseUrl = `/api/sse/stream?${params.toString()}`;
-                    console.log('Connecting to SSE:', sseUrl);
-
-                    try {
-                        sseConnection = new EventSource(sseUrl);
-                        const statusDot = document.querySelector('.realtime-status-dot');
-
-                        // Event: Connection established
-                        sseConnection.onopen = function(event) {
-                            console.log('SSE connection established');
-                            statusDot?.classList.remove('stale');
-                            statusDot?.classList.add('connected');
-                            sseReconnectAttempts = 0; // Reset reconnect attempts
-                        };
-
-                        // Event: Data received
-                        sseConnection.onmessage = function(event) {
-                            try {
-                                const data = JSON.parse(event.data);
-                                console.log('SSE data received:', data);
-
-                                // Update timestamp untuk connection checker
-                                window.lastSuccessfulPollTimestamp = Date.now();
-
-                                // Process data update
-                                handleChartUpdate(data);
-                            } catch (error) {
-                                console.error('Error parsing SSE data:', error);
-                            }
-                        };
-
-                        // Event: Custom events
-                        sseConnection.addEventListener('connected', function(event) {
-                            console.log('SSE connected event:', JSON.parse(event.data));
-                        });
-
-                        sseConnection.addEventListener('data', function(event) {
-                            try {
-                                const data = JSON.parse(event.data);
-                                console.log('SSE data event:', data);
-
-                                // Update timestamp untuk connection checker
-                                window.lastSuccessfulPollTimestamp = Date.now();
-
-                                // Process data update
-                                handleChartUpdate(data);
-                            } catch (error) {
-                                console.error('Error parsing SSE data event:', error);
-                            }
-                        });
-
-                        sseConnection.addEventListener('heartbeat', function(event) {
-                            console.log('SSE heartbeat received');
-                            window.lastSuccessfulPollTimestamp = Date.now();
-                        });
-
-                        sseConnection.addEventListener('error', function(event) {
-                            console.error('SSE error event:', event);
-                            statusDot?.classList.add('stale');
-                        });
-
-                        // Event: Connection error
-                        sseConnection.onerror = function(event) {
-                            console.error('SSE connection error:', event);
-                            statusDot?.classList.add('stale');
-
-                            // Auto-reconnect logic
-                            if (sseReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                                sseReconnectAttempts++;
-                                const delay = Math.min(1000 * Math.pow(2, sseReconnectAttempts),
-                                    30000); // Exponential backoff
-
-                                console.log(
-                                    `SSE reconnecting in ${delay}ms (attempt ${sseReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
-                                );
-
-                                setTimeout(() => {
-                                    if (realtimeToggle?.checked) {
-                                        startSseConnection();
-                                    }
-                                }, delay);
-                            } else {
-                                console.error('Max SSE reconnect attempts reached');
-                                statusDot?.classList.add('stale');
-                            }
-                        };
-
-                    } catch (error) {
-                        console.error('Failed to create SSE connection:', error);
-                        statusDot?.classList.add('stale');
-                    }
-                }
-
-                // Fallback ke polling API jika SSE tidak tersedia
-                function startRealtimePolling() {
-                    console.log('Starting fallback polling...');
-                    // ... existing polling code ...
-                }
-
-                // Tambahkan fungsi baru ini
-                function startConnectionChecker() {
-                    if (window.connectionCheckInterval) {
-                        clearInterval(window.connectionCheckInterval);
-                    }
-
-                    // Jalankan pengecekan setiap 2 detik
-                    window.connectionCheckInterval = setInterval(() => {
-                        const realtimeToggle = document.getElementById('realtime-toggle');
-                        const statusDot = document.querySelector('.realtime-status-dot');
-
-                        // Hanya cek jika toggle real-time aktif
-                        if (!realtimeToggle || !realtimeToggle.checked || !statusDot) {
-                            statusDot?.classList.remove(
-                                'stale'); // Pastikan class 'stale' bersih jika RT non-aktif
-                            return;
-                        }
-
-                        const secondsSinceLastPoll = (Date.now() - window.lastSuccessfulPollTimestamp) / 1000;
-                        const STALE_THRESHOLD_SECONDS = 15; // Anggap koneksi putus setelah 15 detik tanpa data
-
-                        if (secondsSinceLastPoll > STALE_THRESHOLD_SECONDS) {
-                            statusDot.classList.add('stale');
-                        } else {
-                            statusDot.classList.remove('stale');
-                        }
-                    }, 2000);
-                }
-
-                // Panggil fungsi ini saat halaman dimuat
-                console.log('Initializing SSE connection...');
-                startSseConnection();
-
-                // Pastikan SSE dimulai/dihentikan saat toggle diubah
-                document.getElementById('realtime-toggle').addEventListener('change', (event) => {
-                    console.log('Realtime toggle changed:', event.target.checked);
-                    if (event.target.checked) {
-                        window.lastSuccessfulPollTimestamp = Date.now();
-                        startSseConnection();
-                    } else {
-                        if (sseConnection) {
-                            sseConnection.close();
-                            sseConnection = null;
-                            console.log('SSE connection stopped');
-                        }
-                    }
-                });
-
-                // Dan panggil juga saat filter berubah, karena tag dan interval bisa berubah
-                document.addEventListener('chart-data-updated', () => {
-                    console.log('Chart data updated, restarting SSE...');
-                    startSseConnection();
-                });
-
-                // Event listener untuk perubahan status real-time
+                // Event listener untuk memastikan state interval tetap konsisten setelah Livewire update
+                // (hanya diperlukan jika ada update dari server)
                 document.addEventListener('livewire:update', () => {
-                    const realtimeStatus = document.querySelector('.realtime-status');
-                    const statusDot = document.querySelector('.status-dot');
-                    const realtimeEnabled = @this.get('realtimeEnabled');
+                    console.log('🔄 Livewire update event received');
+                    isProcessingInterval = false;
+                });
 
-                    if (realtimeStatus && statusDot) {
-                        // Update tooltip
-                        realtimeStatus.title = realtimeEnabled ? 'Real-time updates active' :
-                            'Real-time updates disabled';
+                // Event listener untuk memastikan overlay loading berfungsi dengan baik
+                document.addEventListener('livewire:load', () => {
+                    console.log('📊 Livewire load event received');
+                });
 
-                        // Update status dot class
-                        statusDot.className = 'status-dot ' + (realtimeEnabled ? 'connected' : 'disconnected');
+                // Event listener untuk memastikan semua komponen siap
+                document.addEventListener('DOMContentLoaded', () => {
+                    console.log('🌐 DOM content loaded');
+                });
 
-                        // Tambahkan efek visual untuk perubahan status
-                        statusDot.classList.add('status-changed');
+                // Event listener untuk menangani error state
+                document.addEventListener('livewire:error', () => {
+                    isProcessingInterval = false;
+                    // Tambahkan efek visual untuk error feedback
+                    const intervalButtons = document.getElementById('interval-buttons');
+                    if (intervalButtons) {
+                        intervalButtons.style.animation = 'shake 0.5s ease-in-out';
                         setTimeout(() => {
-                            statusDot.classList.remove('status-changed');
+                            intervalButtons.style.animation = '';
                         }, 500);
                     }
                 });
@@ -647,30 +899,6 @@
                         this.style.borderColor = 'var(--primary-color)';
                     });
                 }
-
-                // Event listener untuk memastikan state interval tetap konsisten setelah Livewire update
-                // (hanya diperlukan jika ada update dari server)
-                document.addEventListener('livewire:update', () => {
-                    isProcessingInterval = false;
-                });
-
-                // Event listener untuk menangani error state
-                document.addEventListener('livewire:error', () => {
-                    isProcessingInterval = false;
-                    // Tambahkan efek visual untuk error feedback
-                    const intervalButtons = document.getElementById('interval-buttons');
-                    if (intervalButtons) {
-                        intervalButtons.style.animation = 'shake 0.5s ease-in-out';
-                        setTimeout(() => {
-                            intervalButtons.style.animation = '';
-                        }, 500);
-                    }
-                });
-
-                // Panggil fungsi ini di akhir blok 'livewire:navigated'
-                startConnectionChecker();
-
-                window.Livewire.dispatch('loadChartData');
             });
         </script>
     @endscript
