@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\ScadaDataTall;
+// Removed ScadaDataTall - using only ScadaDataWide for efficiency
 use App\Models\ScadaDataWide;
 use App\Services\ScadaDataService;
 use Illuminate\Console\Command;
@@ -49,13 +49,10 @@ class TestWideFormat extends Command
     {
         $this->info('1. Data Comparison:');
 
-        $tallCount = ScadaDataTall::count();
         $wideCount = ScadaDataWide::count();
-        $compressionRatio = round($tallCount / $wideCount, 2);
 
-        $this->line("   - ScadaDataTall: {$tallCount} records");
         $this->line("   - ScadaDataWide: {$wideCount} records");
-        $this->line("   - Compression ratio: {$compressionRatio}x");
+        $this->line("   - Using wide format for efficiency");
         $this->newLine();
 
         // Sample data structure
@@ -182,21 +179,8 @@ class TestWideFormat extends Command
         $endTime = microtime(true);
         $wideTime = round(($endTime - $startTime) * 1000, 2);
 
-        // Test tall format query (for comparison)
-        $startTime = microtime(true);
-        $tallQuery = ScadaDataTall::where('nama_tag', 'temperature')
-            ->whereBetween('timestamp_device', [$startDate, $endDate])
-            ->count();
-        $endTime = microtime(true);
-        $tallTime = round(($endTime - $startTime) * 1000, 2);
-
         $this->line("   - Wide format query: {$wideTime}ms ({$wideQuery} records)");
-        $this->line("   - Tall format query: {$tallTime}ms ({$tallQuery} records)");
-
-        if ($tallTime > 0) {
-            $improvement = round((($tallTime - $wideTime) / $tallTime) * 100, 1);
-            $this->line("   - Performance improvement: {$improvement}%");
-        }
+        $this->line("   - Using wide format for optimal performance");
         $this->newLine();
     }
 }

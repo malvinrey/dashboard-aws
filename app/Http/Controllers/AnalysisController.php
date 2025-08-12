@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\ScadaDataService;
-use App\Models\ScadaDataTall;
+// Removed ScadaDataTall - using only ScadaDataWide for efficiency
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
