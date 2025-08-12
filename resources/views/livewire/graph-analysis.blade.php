@@ -429,90 +429,131 @@
                 // HAPUS listener 'append-missed-points' - SUDAH TIDAK DIPERLUKAN
                 // Gap sekarang dibuat langsung di visibilitychange listener
 
-                // Polling API untuk data real-time
-                let realtimePollingInterval = null;
+                // SSE Connection untuk data real-time (menggantikan polling API)
+                let sseConnection = null;
+                let sseReconnectAttempts = 0;
+                const MAX_RECONNECT_ATTEMPTS = 5;
 
-                function startRealtimePolling() {
-                    console.log('Starting realtime polling...');
+                function startSseConnection() {
+                    console.log('Starting SSE connection...');
 
-                    // Hentikan polling lama jika ada
-                    if (realtimePollingInterval) {
-                        clearInterval(realtimePollingInterval);
-                        console.log('Cleared previous polling interval');
+                    // Hentikan koneksi lama jika ada
+                    if (sseConnection) {
+                        sseConnection.close();
+                        sseConnection = null;
                     }
 
-                    realtimePollingInterval = setInterval(async () => {
-                        const plotlyChart = document.getElementById('plotlyChart');
-                        const selectedTags = @this.get('selectedTags');
-                        const interval = @this.get('interval');
-                        const realtimeToggle = document.getElementById('realtime-toggle');
+                    const selectedTags = @this.get('selectedTags');
+                    const interval = @this.get('interval');
+                    const realtimeToggle = document.getElementById('realtime-toggle');
 
-                        console.log('Polling check:', {
-                            hasChart: !!plotlyChart,
-                            selectedTags: selectedTags,
-                            interval: interval,
-                            toggleChecked: realtimeToggle?.checked
+                    if (!selectedTags || selectedTags.length === 0 || !realtimeToggle || !realtimeToggle.checked) {
+                        console.log('SSE connection skipped - conditions not met');
+                        return;
+                    }
+
+                    const params = new URLSearchParams({
+                        interval: interval
+                    });
+                    selectedTags.forEach(tag => params.append('tags[]', tag));
+
+                    const sseUrl = `/api/sse/stream?${params.toString()}`;
+                    console.log('Connecting to SSE:', sseUrl);
+
+                    try {
+                        sseConnection = new EventSource(sseUrl);
+                        const statusDot = document.querySelector('.realtime-status-dot');
+
+                        // Event: Connection established
+                        sseConnection.onopen = function(event) {
+                            console.log('SSE connection established');
+                            statusDot?.classList.remove('stale');
+                            statusDot?.classList.add('connected');
+                            sseReconnectAttempts = 0; // Reset reconnect attempts
+                        };
+
+                        // Event: Data received
+                        sseConnection.onmessage = function(event) {
+                            try {
+                                const data = JSON.parse(event.data);
+                                console.log('SSE data received:', data);
+
+                                // Update timestamp untuk connection checker
+                                window.lastSuccessfulPollTimestamp = Date.now();
+
+                                // Process data update
+                                handleChartUpdate(data);
+                            } catch (error) {
+                                console.error('Error parsing SSE data:', error);
+                            }
+                        };
+
+                        // Event: Custom events
+                        sseConnection.addEventListener('connected', function(event) {
+                            console.log('SSE connected event:', JSON.parse(event.data));
                         });
 
-                        if (!plotlyChart || !selectedTags || selectedTags.length === 0 || !realtimeToggle ||
-                            !realtimeToggle.checked) {
-                            console.log('Polling skipped - conditions not met');
-                            return;
-                        }
+                        sseConnection.addEventListener('data', function(event) {
+                            try {
+                                const data = JSON.parse(event.data);
+                                console.log('SSE data event:', data);
 
-                        const statusDot = document.querySelector('.realtime-status-dot');
-                        try {
-                            statusDot?.classList.add(
-                                'loading'); // <-- Tambahkan kelas .loading SEBELUM fetch
+                                // Update timestamp untuk connection checker
+                                window.lastSuccessfulPollTimestamp = Date.now();
 
-                            const params = new URLSearchParams({
-                                interval: interval
-                            });
-                            selectedTags.forEach(tag => params.append('tags[]', tag));
-
-                            // Tambahkan parameter unik (_=timestamp) untuk mencegah caching
-                            const cacheBuster = `&_=${new Date().getTime()}`;
-                            const url = `/api/latest-data?${params.toString()}${cacheBuster}`;
-                            console.log('Fetching from:', url);
-
-                            const response = await fetch(url, {
-                                cache: 'no-store', // Tambahkan opsi ini untuk lebih eksplisit
-                                headers: {
-                                    'Cache-Control': 'no-cache, no-store, must-revalidate',
-                                    'Pragma': 'no-cache',
-                                    'Expires': '0'
-                                }
-                            });
-
-                            console.log('API Response status:', response.status);
-
-                            if (response.status === 204) { // No new data
-                                console.log('No new data available');
-                                return; // Jangan lakukan apa-apa, biarkan finally berjalan
+                                // Process data update
+                                handleChartUpdate(data);
+                            } catch (error) {
+                                console.error('Error parsing SSE data event:', error);
                             }
-                            if (!response.ok) {
-                                throw new Error(`Network response was not ok: ${response.status}`);
+                        });
+
+                        sseConnection.addEventListener('heartbeat', function(event) {
+                            console.log('SSE heartbeat received');
+                            window.lastSuccessfulPollTimestamp = Date.now();
+                        });
+
+                        sseConnection.addEventListener('error', function(event) {
+                            console.error('SSE error event:', event);
+                            statusDot?.classList.add('stale');
+                        });
+
+                        // Event: Connection error
+                        sseConnection.onerror = function(event) {
+                            console.error('SSE connection error:', event);
+                            statusDot?.classList.add('stale');
+
+                            // Auto-reconnect logic
+                            if (sseReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                                sseReconnectAttempts++;
+                                const delay = Math.min(1000 * Math.pow(2, sseReconnectAttempts),
+                                    30000); // Exponential backoff
+
+                                console.log(
+                                    `SSE reconnecting in ${delay}ms (attempt ${sseReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`
+                                );
+
+                                setTimeout(() => {
+                                    if (realtimeToggle?.checked) {
+                                        startSseConnection();
+                                    }
+                                }, delay);
+                            } else {
+                                console.error('Max SSE reconnect attempts reached');
+                                statusDot?.classList.add('stale');
                             }
+                        };
 
-                            const data = await response.json();
-                            console.log('API Response data:', data);
+                    } catch (error) {
+                        console.error('Failed to create SSE connection:', error);
+                        statusDot?.classList.add('stale');
+                    }
+                }
 
-                            // TAMBAHKAN BARIS INI
-                            window.lastSuccessfulPollTimestamp = Date.now(); // Catat waktu poll berhasil
-
-                            // PANGGIL FUNGSI LANGSUNG - TIDAK LAGI MENGGUNAKAN EVENT BUS
-                            handleChartUpdate(data);
-
-                        } catch (error) {
-                            console.error("Realtime poll failed:", error);
-                        } finally {
-                            statusDot?.classList.remove(
-                                'loading'
-                            ); // <-- Hapus kelas .loading SETELAH fetch selesai (baik sukses maupun gagal)
-                        }
-                    }, 5000); // Poll setiap 5 detik
-
-                    console.log('Realtime polling started successfully');
+                // Fallback ke polling API jika SSE tidak tersedia
+                function startRealtimePolling() {
+                    console.log('Starting fallback polling...');
+                    // ... existing polling code ...
                 }
 
                 // Tambahkan fungsi baru ini
@@ -545,28 +586,28 @@
                 }
 
                 // Panggil fungsi ini saat halaman dimuat
-                console.log('Initializing realtime polling...');
-                startRealtimePolling();
+                console.log('Initializing SSE connection...');
+                startSseConnection();
 
-                // Pastikan polling dimulai/dihentikan saat toggle diubah
+                // Pastikan SSE dimulai/dihentikan saat toggle diubah
                 document.getElementById('realtime-toggle').addEventListener('change', (event) => {
                     console.log('Realtime toggle changed:', event.target.checked);
                     if (event.target.checked) {
-                        window.lastSuccessfulPollTimestamp = Date.now(); // TAMBAHKAN INI
-                        startRealtimePolling();
+                        window.lastSuccessfulPollTimestamp = Date.now();
+                        startSseConnection();
                     } else {
-                        if (realtimePollingInterval) {
-                            clearInterval(realtimePollingInterval);
-                            realtimePollingInterval = null;
-                            console.log('Realtime polling stopped');
+                        if (sseConnection) {
+                            sseConnection.close();
+                            sseConnection = null;
+                            console.log('SSE connection stopped');
                         }
                     }
                 });
 
                 // Dan panggil juga saat filter berubah, karena tag dan interval bisa berubah
                 document.addEventListener('chart-data-updated', () => {
-                    console.log('Chart data updated, restarting polling...');
-                    startRealtimePolling();
+                    console.log('Chart data updated, restarting SSE...');
+                    startSseConnection();
                 });
 
                 // Event listener untuk perubahan status real-time

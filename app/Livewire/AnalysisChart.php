@@ -169,6 +169,8 @@ class AnalysisChart extends Component
     /**
      * Fetches the latest data point for real-time updates.
      * Called by `wire:poll` every 5 seconds.
+     *
+     * @deprecated Gunakan SSE stream untuk real-time updates yang lebih efisien
      */
     public function getLatestDataPoint()
     {
@@ -182,6 +184,23 @@ class AnalysisChart extends Component
         if ($latestData) {
             $this->dispatch('update-last-point', data: $latestData);
         }
+    }
+
+    /**
+     * Get SSE stream URL untuk real-time updates
+     */
+    public function getSseStreamUrl(): string
+    {
+        if (empty($this->selectedTags)) {
+            return '';
+        }
+
+        $params = http_build_query([
+            'tags' => $this->selectedTags,
+            'interval' => $this->interval
+        ]);
+
+        return "/api/sse/stream?{$params}";
     }
 
 
