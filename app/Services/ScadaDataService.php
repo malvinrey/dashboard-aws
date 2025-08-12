@@ -747,4 +747,65 @@ class ScadaDataService
             throw $e;
         }
     }
+
+    /**
+     * Mengambil data historis dengan agregasi dinamis berdasarkan rentang waktu.
+     *
+     * @param array $tags
+     * @param string $startDate
+     * @param string $endDate
+     * @param string $aggregationLevel ('second', 'minute', 'hour', 'day')
+     * @return \Illuminate\Support\Collection
+     */
+    public function getAggregatedHistoricalData(array $tags, string $startDate, string $endDate, string $aggregationLevel = 'second')
+    {
+        // Tentukan format grup waktu untuk SQL berdasarkan level agregasi
+        $timeFormat = match ($aggregationLevel) {
+            'minute' => '%Y-%m-%d %H:%i:00',
+            'hour'   => '%Y-%m-%d %H:00:00',
+            'day'    => '%Y-%m-%d 00:00:00',
+            default  => '%Y-%m-%d %H:%i:%s', // 'second'
+        };
+
+        // Jika levelnya adalah 'second', kita ambil data mentah tanpa agregasi
+        // untuk menjaga performa pada rentang waktu yang sangat pendek.
+        if ($aggregationLevel === 'second') {
+            $columnsToSelect = array_merge(['timestamp_device', 'nama_group'], array_intersect($tags, [
+                'par_sensor',
+                'solar_radiation',
+                'wind_speed',
+                'wind_direction',
+                'temperature',
+                'humidity',
+                'pressure',
+                'rainfall'
+            ]));
+
+            return ScadaDataWide::query()
+                ->whereBetween('timestamp_device', [$startDate, $endDate])
+                ->select($columnsToSelect)
+                ->orderBy('timestamp_device', 'asc')
+                ->limit(1000) // Batasi data mentah untuk performa
+                ->get();
+        }
+
+        // Jika levelnya bukan 'second', lakukan agregasi di database
+        $selects = [DB::raw("DATE_FORMAT(timestamp_device, '{$timeFormat}') as time_bucket")];
+
+        // Tambahkan agregasi untuk setiap tag yang diminta
+        foreach ($tags as $tag) {
+            if (in_array($tag, ['par_sensor', 'solar_radiation', 'wind_speed', 'wind_direction', 'temperature', 'humidity', 'pressure', 'rainfall'])) {
+                $selects[] = DB::raw("AVG($tag) as avg_$tag");
+                $selects[] = DB::raw("MAX($tag) as max_$tag");
+                $selects[] = DB::raw("MIN($tag) as min_$tag");
+            }
+        }
+
+        return DB::table('scada_data_wides')
+            ->whereBetween('timestamp_device', [$startDate, $endDate])
+            ->select($selects)
+            ->groupBy('time_bucket')
+            ->orderBy('time_bucket', 'asc')
+            ->get();
+    }
 }

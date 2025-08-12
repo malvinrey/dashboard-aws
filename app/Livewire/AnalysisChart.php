@@ -21,6 +21,10 @@ class AnalysisChart extends Component
     public ?string $startDate = null;
     public ?string $endDate = null;
 
+    // Properties for historical data loading
+    public array $historicalData = [];
+    public bool $isLoading = false;
+
     // Property to manage state for the "Load More" feature (lazy loading)
     public ?string $earliestLoadedDate = null;
 
@@ -201,6 +205,50 @@ class AnalysisChart extends Component
         ]);
 
         return "/api/sse/stream?{$params}";
+    }
+
+    /**
+     * Method ini akan dipanggil secara otomatis oleh `wire:init` di frontend.
+     * Anda bisa memanggilnya lagi dari UI untuk refresh data dengan rentang waktu berbeda.
+     *
+     * @param string $startDate (contoh: '2025-08-11 00:00:00')
+     * @param string $endDate (contoh: '2025-08-12 00:00:00')
+     */
+    public function loadHistoricalData($startDate, $endDate)
+    {
+        $this->isLoading = true;
+
+        // --- Logika Penentuan Agregasi Dinamis ---
+        try {
+            $durationInSeconds = Carbon::parse($endDate)->diffInSeconds(Carbon::parse($startDate));
+
+            $aggregationLevel = 'second';
+            if ($durationInSeconds > 3600 * 6) { // > 6 jam -> agregat per menit
+                $aggregationLevel = 'minute';
+            }
+            if ($durationInSeconds > 86400 * 7) { // > 7 hari -> agregat per jam
+                $aggregationLevel = 'hour';
+            }
+            if ($durationInSeconds > 86400 * 30) { // > 30 hari -> agregat per hari
+                $aggregationLevel = 'day';
+            }
+
+            // Panggil service untuk mengambil data yang sudah diagregasi
+            $this->historicalData = app(ScadaDataService::class)->getAggregatedHistoricalData(
+                $this->selectedTags,
+                $startDate,
+                $endDate,
+                $aggregationLevel
+            )->toArray();
+
+            // Kirim event ke frontend bahwa data sudah siap, beserta datanya
+            $this->dispatch('historicalDataLoaded', data: $this->historicalData);
+        } catch (\Exception $e) {
+            // Tangani error jika terjadi, misal kirim notifikasi error ke frontend
+            $this->dispatch('historicalDataError', message: 'Failed to load historical data.');
+        } finally {
+            $this->isLoading = false;
+        }
     }
 
 
