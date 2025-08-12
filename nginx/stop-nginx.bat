@@ -1,15 +1,20 @@
 @echo off
-echo Stopping Nginx for SCADA Dashboard...
+echo Gracefully stopping Nginx for SCADA Dashboard...
 echo.
 
-echo Checking if Nginx is running...
-tasklist /FI "IMAGENAME eq nginx.exe" 2>NUL | find /I /N "nginx.exe">NUL
-if "%ERRORLEVEL%"=="0" (
-    echo Stopping Nginx...
-    taskkill /f /im nginx.exe
-    echo ✓ Nginx stopped successfully!
+rem Pindah ke direktori instalasi Nginx
+cd /d "C:\nginx"
+
+rem Kirim sinyal stop dengan path prefix yang benar
+nginx.exe -p "D:\dashboard-aws" -s stop
+
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo ✓ Nginx stop signal sent successfully.
 ) else (
-    echo Nginx is not running.
+    echo.
+    echo ✗ Failed to send stop signal!
+    echo Check if Nginx is running from this configuration.
 )
 
 echo.

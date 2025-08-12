@@ -3,20 +3,29 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\ScadaDataService; // <-- Impor service baru
+use App\Jobs\ProcessScadaDataJob;
+use App\Jobs\ProcessLargeScadaDatasetJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class ReceiverController extends Controller
 {
-    // Gunakan dependency injection untuk "memanggil" service
-    public function __construct(protected ScadaDataService $scadaDataService) {}
+    /**
+     * Threshold untuk menentukan apakah dataset dianggap "besar"
+     * dan perlu diproses dengan job khusus
+     */
+    private const LARGE_DATASET_THRESHOLD = 5000;
 
     public function store(Request $request)
     {
-        // Aktifkan logging untuk melihat payload yang masuk
-        // Log::info('Incoming SCADA Payload:', $request->all());
+        $startTime = microtime(true);
+        $dataCount = count($request->input('DataArray', []));
+
+        Log::info('Incoming SCADA Payload received', [
+            'data_count' => $dataCount,
+            'timestamp' => now()->format('Y-m-d H:i:s')
+        ]);
 
         $validator = Validator::make($request->all(), [
             'DataArray' => 'required|array|min:1|max:10000', // Batasi maksimal 10k data per request
@@ -54,38 +63,84 @@ class ReceiverController extends Controller
         }
 
         try {
-            $startTime = microtime(true);
+            // Tentukan job yang akan digunakan berdasarkan ukuran dataset
+            if ($dataCount >= self::LARGE_DATASET_THRESHOLD) {
+                // Dataset besar: gunakan job khusus dengan chunking
+                $job = new ProcessLargeScadaDatasetJob($request->all(), 1000);
+                $queueName = 'scada-large-datasets';
 
-            // Cukup panggil satu method dari service untuk melakukan semua pekerjaan
-            $this->scadaDataService->processScadaPayload($request->all());
+                Log::info('Dispatching large dataset job', [
+                    'data_count' => $dataCount,
+                    'queue' => $queueName,
+                    'chunk_size' => 1000
+                ]);
+            } else {
+                // Dataset normal: gunakan job standar
+                $job = new ProcessScadaDataJob($request->all());
+                $queueName = 'scada-processing';
 
-            $processingTime = round((microtime(true) - $startTime) * 1000, 2);
+                Log::info('Dispatching standard dataset job', [
+                    'data_count' => $dataCount,
+                    'queue' => $queueName
+                ]);
+            }
 
-            Log::info('SCADA Payload processed successfully', [
-                'processing_time_ms' => $processingTime,
-                'data_count' => count($request->input('DataArray', [])),
+            // Dispatch job ke queue
+            dispatch($job);
+
+            $responseTime = round((microtime(true) - $startTime) * 1000, 2);
+
+            Log::info('SCADA Payload queued successfully', [
+                'response_time_ms' => $responseTime,
+                'data_count' => $dataCount,
+                'queue' => $queueName,
+                'job_class' => get_class($job),
                 'timestamp' => now()
             ]);
 
             return response()->json([
-                'status' => 'success',
-                'message' => 'Data successfully received and processed.',
-                'processing_time_ms' => $processingTime,
-                'data_count' => count($request->input('DataArray', []))
-            ], 201);
+                'status' => 'accepted',
+                'message' => 'Data accepted and queued for processing.',
+                'data_count' => $dataCount,
+                'queue' => $queueName,
+                'response_time_ms' => $responseTime,
+                'estimated_processing_time' => $this->estimateProcessingTime($dataCount),
+                'note' => 'Data will be processed in the background. Check logs for progress updates.'
+            ], 202); // HTTP 202 Accepted
+
         } catch (\Exception $e) {
-            Log::error('SCADA Payload processing error', [
+            $responseTime = round((microtime(true) - $startTime) * 1000, 2);
+
+            Log::error('SCADA Payload queuing error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'payload_size' => count($request->all()),
+                'data_count' => $dataCount,
+                'response_time_ms' => $responseTime,
                 'timestamp' => now()
             ]);
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'Server error while processing data.',
-                'error_code' => 'PROCESSING_ERROR'
+                'message' => 'Server error while queuing data for processing.',
+                'error_code' => 'QUEUING_ERROR',
+                'data_count' => $dataCount
             ], 500);
+        }
+    }
+
+    /**
+     * Estimate processing time based on data count
+     */
+    private function estimateProcessingTime(int $dataCount): string
+    {
+        if ($dataCount <= 1000) {
+            return '1-2 minutes';
+        } elseif ($dataCount <= 5000) {
+            return '3-5 minutes';
+        } elseif ($dataCount <= 10000) {
+            return '5-10 minutes';
+        } else {
+            return '10+ minutes';
         }
     }
 }
