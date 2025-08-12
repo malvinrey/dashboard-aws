@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ExportController;
+use App\Http\Controllers\PerformanceController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -28,3 +29,11 @@ Route::get('/analysis', AnalysisChart::class);
 
 // Route untuk mengakses file export
 Route::get('/export/download/{filename}', [ExportController::class, 'download'])->name('export.download');
+
+// Performance monitoring routes
+Route::prefix('performance')->name('performance.')->group(function () {
+    Route::get('/', [PerformanceController::class, 'index'])->name('dashboard');
+    Route::get('/metrics', [PerformanceController::class, 'getMetrics'])->name('metrics');
+    Route::get('/recommendations', [PerformanceController::class, 'getOptimizationRecommendations'])->name('recommendations');
+    Route::post('/clear-cache', [PerformanceController::class, 'clearCache'])->name('clear-cache');
+});

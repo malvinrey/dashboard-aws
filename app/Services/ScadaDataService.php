@@ -20,12 +20,17 @@ class ScadaDataService
     {
         try {
             DB::transaction(function () use ($payload) {
-                collect($payload['DataArray'])->each(function ($dataGroup) {
+                $insertData = [];
+                $now = now(); // Gunakan waktu yang sama untuk semua record dalam satu batch
+
+                foreach ($payload['DataArray'] as $dataGroup) {
                     // Siapkan data untuk satu baris
                     $dataToInsert = [
                         'batch_id'         => Str::uuid(),
                         'nama_group'       => $dataGroup['_groupTag'],
                         'timestamp_device' => $dataGroup['_terminalTime'],
+                        'created_at'       => $now,
+                        'updated_at'       => $now,
                     ];
 
                     // Map setiap sensor ke kolomnya
@@ -35,9 +40,13 @@ class ScadaDataService
                         }
                     }
 
-                    // Simpan satu baris ke database
-                    ScadaDataWide::create($dataToInsert);
-                });
+                    $insertData[] = $dataToInsert;
+                }
+
+                // Lakukan satu kali query untuk semua data (BULK INSERT)
+                if (!empty($insertData)) {
+                    DB::table('scada_data_wides')->insert($insertData);
+                }
             });
         } catch (\Exception $e) {
             Log::error('SCADA Payload Processing Error (Wide Format): ' . $e->getMessage(), ['payload' => $payload]);
@@ -51,59 +60,100 @@ class ScadaDataService
      */
     public function getDashboardMetrics(): array
     {
-        // 1. Tentukan satuan untuk setiap tag
-        $units = [
-            'temperature' => '°C',
-            'humidity' => '%',
-            'pressure' => 'hPa',
-            'rainfall' => 'mm',
-            'wind_speed' => 'm/s',
-            'wind_direction' => '°',
-            'par_sensor' => 'μmol/m²/s',
-            'solar_radiation' => 'W/m²',
-        ];
+        try {
+            // 1. Tentukan satuan untuk setiap tag
+            $units = [
+                'temperature' => '°C',
+                'humidity' => '%',
+                'pressure' => 'hPa',
+                'rainfall' => 'mm',
+                'wind_speed' => 'm/s',
+                'wind_direction' => '°',
+                'par_sensor' => 'μmol/m²/s',
+                'solar_radiation' => 'W/m²',
+            ];
 
-        // 2. Ambil dua record terakhir untuk perbandingan
-        $latestRecords = ScadaDataWide::orderBy('timestamp_device', 'desc')->limit(2)->get();
+            // 2. Optimasi query: Ambil hanya kolom yang diperlukan
+            $latestRecords = ScadaDataWide::select([
+                'id',
+                'timestamp_device',
+                'nama_group',
+                'par_sensor',
+                'solar_radiation',
+                'wind_speed',
+                'wind_direction',
+                'temperature',
+                'humidity',
+                'pressure',
+                'rainfall'
+            ])
+                ->orderBy('timestamp_device', 'desc')
+                ->limit(2)
+                ->get();
 
-        if ($latestRecords->isEmpty()) {
-            return ['metrics' => [], 'lastPayloadInfo' => null];
-        }
-
-        $latestData = $latestRecords->first();
-        $previousData = $latestRecords->count() > 1 ? $latestRecords->get(1) : null;
-
-        // 3. Proses data untuk membuat struktur metrik yang lengkap
-        $metrics = [];
-        $sensorColumns = ['par_sensor', 'solar_radiation', 'wind_speed', 'wind_direction', 'temperature', 'humidity', 'pressure', 'rainfall'];
-
-        foreach ($sensorColumns as $sensor) {
-            $currentValue = $latestData->$sensor;
-
-            if (is_null($currentValue)) {
-                continue; // Lewati sensor jika nilainya null
+            if ($latestRecords->isEmpty()) {
+                return [
+                    'metrics' => [],
+                    'lastPayloadInfo' => null,
+                    'error' => 'No data available'
+                ];
             }
 
-            $previousValue = $previousData ? $previousData->$sensor : null;
+            $latestData = $latestRecords->first();
+            $previousData = $latestRecords->count() > 1 ? $latestRecords->get(1) : null;
 
-            $change = null;
-            if (!is_null($previousValue) && $previousValue != 0) {
-                $change = (($currentValue - $previousValue) / abs($previousValue)) * 100;
+            // 3. Proses data untuk membuat struktur metrik yang lengkap
+            $metrics = [];
+            $sensorColumns = ['par_sensor', 'solar_radiation', 'wind_speed', 'wind_direction', 'temperature', 'humidity', 'pressure', 'rainfall'];
+
+            foreach ($sensorColumns as $sensor) {
+                $currentValue = $latestData->$sensor;
+
+                if (is_null($currentValue)) {
+                    continue; // Lewati sensor jika nilainya null
+                }
+
+                $previousValue = $previousData ? $previousData->$sensor : null;
+
+                $change = null;
+                if (!is_null($previousValue) && $previousValue != 0) {
+                    $change = (($currentValue - $previousValue) / abs($previousValue)) * 100;
+                }
+
+                $metrics[$sensor] = [
+                    'value' => $currentValue,
+                    'unit' => $units[$sensor] ?? '-',
+                    'timestamp' => $latestData->timestamp_device,
+                    'change' => is_numeric($change) ? round($change, 1) : null,
+                    'change_class' => is_null($change) ? '' : ($change >= 0 ? 'positive' : 'negative'),
+                ];
             }
 
-            $metrics[$sensor] = [
-                'value' => $currentValue,
-                'unit' => $units[$sensor] ?? '-',
+            // 4. Tambahkan informasi performa dengan struktur yang konsisten
+            $lastPayloadInfo = [
+                'id' => $latestData->id,
                 'timestamp' => $latestData->timestamp_device,
-                'change' => is_numeric($change) ? round($change, 1) : null,
-                'change_class' => is_null($change) ? '' : ($change >= 0 ? 'positive' : 'negative'),
+                'group' => $latestData->nama_group,
+                'data_age_seconds' => now()->diffInSeconds($latestData->timestamp_device),
+                'is_recent' => now()->diffInMinutes($latestData->timestamp_device) <= 5,
+                'batch_id' => $latestData->batch_id ?? 'N/A'
+            ];
+
+            return [
+                'metrics' => $metrics,
+                'lastPayloadInfo' => $lastPayloadInfo
+            ];
+        } catch (\Exception $e) {
+            Log::error('Error in getDashboardMetrics: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return [
+                'metrics' => [],
+                'lastPayloadInfo' => null,
+                'error' => 'Failed to load dashboard data: ' . $e->getMessage()
             ];
         }
-
-        return [
-            'metrics' => $metrics,
-            'lastPayloadInfo' => $latestData
-        ];
     }
 
     /**
@@ -116,80 +166,118 @@ class ScadaDataService
             return ['data' => [], 'layout' => []];
         }
 
-        $start = Carbon::parse($startDateTime);
-        $end = Carbon::parse($endDateTime);
+        try {
+            $start = Carbon::parse($startDateTime);
+            $end = Carbon::parse($endDateTime);
 
-        $query = ScadaDataWide::whereBetween('timestamp_device', [$start, $end]);
+            // Validasi range waktu (maksimal 30 hari untuk performa)
+            if ($start->diffInDays($end) > 30) {
+                $end = $start->copy()->addDays(30);
+                Log::warning('Date range too large, limiting to 30 days', [
+                    'original_start' => $startDateTime,
+                    'original_end' => $endDateTime,
+                    'adjusted_end' => $end->format('Y-m-d H:i:s')
+                ]);
+            }
 
-        // KUNCI PERBAIKAN: Lakukan agregasi berdasarkan interval
-        if ($interval !== 'second') {
-            // Tentukan format grouping berdasarkan interval
-            $timeGroupFormat = match ($interval) {
-                'minute' => '%Y-%m-%d %H:%i:00',
-                'hour'   => '%Y-%m-%d %H:00:00',
-                'day'    => '%Y-%m-%d 00:00:00',
-                default  => '%Y-%m-%d %H:00:00', // Default ke jam
-            };
+            $query = ScadaDataWide::whereBetween('timestamp_device', [$start, $end]);
 
-            // Buat query dengan agregasi
-            $queryResult = $query
-                ->selectRaw("DATE_FORMAT(timestamp_device, '$timeGroupFormat') as timestamp_group")
-                ->addSelect(DB::raw("AVG(temperature) as temperature"))
-                ->addSelect(DB::raw("AVG(humidity) as humidity"))
-                ->addSelect(DB::raw("AVG(pressure) as pressure"))
-                ->addSelect(DB::raw("AVG(rainfall) as rainfall"))
-                ->addSelect(DB::raw("AVG(wind_speed) as wind_speed"))
-                ->addSelect(DB::raw("AVG(wind_direction) as wind_direction"))
-                ->addSelect(DB::raw("AVG(par_sensor) as par_sensor"))
-                ->addSelect(DB::raw("AVG(solar_radiation) as solar_radiation"))
-                ->groupBy('timestamp_group')
-                ->orderBy('timestamp_group', 'asc')
-                ->get();
-        } else {
-            // Untuk interval 'second', ambil data mentah
-            $columnsToSelect = array_merge(['timestamp_device'], $tags);
-            $queryResult = $query
-                ->select($columnsToSelect)
-                ->orderBy('timestamp_device', 'asc')
-                ->get();
-        }
+            // KUNCI PERBAIKAN: Lakukan agregasi berdasarkan interval
+            if ($interval !== 'second') {
+                // Tentukan format grouping berdasarkan interval
+                $timeGroupFormat = match ($interval) {
+                    'minute' => '%Y-%m-%d %H:%i:00',
+                    'hour'   => '%Y-%m-%d %H:00:00',
+                    'day'    => '%Y-%m-%d 00:00:00',
+                    default  => '%Y-%m-%d %H:00:00', // Default ke jam
+                };
 
-        if ($queryResult->isEmpty()) {
-            return ['data' => [], 'layout' => []];
-        }
+                // Buat query dengan agregasi - PERBAIKAN: Gunakan select() dan addSelect() yang benar
+                $query = $query->selectRaw("DATE_FORMAT(timestamp_device, '$timeGroupFormat') as timestamp_group");
 
-        $plotlyTraces = [];
-        $colorPalette = ['#007bff', '#dc3545', '#ffc107', '#28a745', '#6f42c1', '#fd7e14'];
+                // Hanya select kolom yang diminta dengan addSelect
+                foreach ($tags as $tag) {
+                    if (in_array($tag, ['temperature', 'humidity', 'pressure', 'rainfall', 'wind_speed', 'wind_direction', 'par_sensor', 'solar_radiation'])) {
+                        $query->addSelect(DB::raw("AVG($tag) as $tag"));
+                    }
+                }
 
-        foreach ($tags as $key => $tag) {
-            $labels = $queryResult->pluck($interval === 'second' ? 'timestamp_device' : 'timestamp_group')->map(function ($date) {
-                return Carbon::parse($date)->format('Y-m-d H:i:s');
-            })->toArray();
+                $queryResult = $query
+                    ->groupBy('timestamp_group')
+                    ->orderBy('timestamp_group', 'asc')
+                    ->get();
+            } else {
+                // Untuk interval 'second', ambil data mentah dengan optimasi
+                $columnsToSelect = array_merge(['timestamp_device'], array_intersect($tags, [
+                    'temperature',
+                    'humidity',
+                    'pressure',
+                    'rainfall',
+                    'wind_speed',
+                    'wind_direction',
+                    'par_sensor',
+                    'solar_radiation'
+                ]));
 
-            $values = $queryResult->pluck($tag)->toArray();
+                $queryResult = $query
+                    ->select($columnsToSelect)
+                    ->orderBy('timestamp_device', 'asc')
+                    ->limit(1000) // Batasi data mentah untuk performa
+                    ->get();
+            }
 
-            $plotlyTraces[] = [
-                'x' => $labels,
-                'y' => $values,
-                'type' => 'scatter',
-                'mode' => 'lines+markers',
-                'name' => ucfirst(str_replace('_', ' ', $tag)),
-                'line' => ['color' => $colorPalette[$key % count($colorPalette)], 'width' => 2],
-                'marker' => ['size' => 4],
-                'connectgaps' => false,
+            if ($queryResult->isEmpty()) {
+                return ['data' => [], 'layout' => []];
+            }
+
+            $plotlyTraces = [];
+            $colorPalette = ['#007bff', '#dc3545', '#ffc107', '#28a745', '#6f42c1', '#fd7e14'];
+
+            foreach ($tags as $key => $tag) {
+                // Validasi tag sebelum diproses
+                if (!in_array($tag, ['temperature', 'humidity', 'pressure', 'rainfall', 'wind_speed', 'wind_direction', 'par_sensor', 'solar_radiation'])) {
+                    continue;
+                }
+
+                $labels = $queryResult->pluck($interval === 'second' ? 'timestamp_device' : 'timestamp_group')->map(function ($date) {
+                    return Carbon::parse($date)->format('Y-m-d H:i:s');
+                })->toArray();
+
+                $values = $queryResult->pluck($tag)->toArray();
+
+                $plotlyTraces[] = [
+                    'x' => $labels,
+                    'y' => $values,
+                    'type' => 'scatter',
+                    'mode' => 'lines+markers',
+                    'name' => ucfirst(str_replace('_', ' ', $tag)),
+                    'line' => ['color' => $colorPalette[$key % count($colorPalette)], 'width' => 2],
+                    'marker' => ['size' => 4],
+                    'connectgaps' => false,
+                ];
+            }
+
+            $layout = [
+                'title' => 'Historical Sensor Data',
+                'xaxis' => ['title' => 'Timestamp'],
+                'yaxis' => ['title' => 'Value'],
+                'margin' => ['l' => 50, 'r' => 50, 'b' => 50, 't' => 50],
+                'legend' => ['orientation' => 'h', 'y' => 1.1],
+                'template' => 'plotly_dark',
             ];
+
+            return ['data' => $plotlyTraces, 'layout' => $layout];
+        } catch (\Exception $e) {
+            Log::error('Error fetching historical chart data', [
+                'error' => $e->getMessage(),
+                'tags' => $tags,
+                'interval' => $interval,
+                'start_date' => $startDateTime,
+                'end_date' => $endDateTime
+            ]);
+
+            return ['data' => [], 'layout' => [], 'error' => 'Failed to fetch chart data'];
         }
-
-        $layout = [
-            'title' => 'Historical Sensor Data',
-            'xaxis' => ['title' => 'Timestamp'],
-            'yaxis' => ['title' => 'Value'],
-            'margin' => ['l' => 50, 'r' => 50, 'b' => 50, 't' => 50],
-            'legend' => ['orientation' => 'h', 'y' => 1.1],
-            'template' => 'plotly_dark',
-        ];
-
-        return ['data' => $plotlyTraces, 'layout' => $layout];
     }
 
     /**
@@ -222,17 +310,17 @@ class ScadaDataService
      * Mengambil data log untuk ditampilkan di halaman log-data
      * Menggunakan format wide untuk efisiensi dan dapat menampilkan lebih banyak data
      */
-    public function getLogData(int $limit = 50)
+    public function getLogData(int $limit = 50, int $page = 1)
     {
         return ScadaDataWide::orderBy('id', 'desc')
-            ->limit($limit)
-            ->get();
+            ->paginate($limit, ['*'], 'page', $page);
     }
 
     /**
      * Mengambil data log dengan filter tanggal, pencarian, dan pengurutan
+     * Menggunakan pagination untuk performa yang lebih baik
      */
-    public function getLogDataWithFilters(int $limit = 50, string $startDate = '', string $endDate = '', string $search = '', string $sortField = 'id', string $sortDirection = 'desc')
+    public function getLogDataWithFilters(int $limit = 50, string $startDate = '', string $endDate = '', string $search = '', string $sortField = 'id', string $sortDirection = 'desc', int $page = 1)
     {
         $query = ScadaDataWide::query();
 
@@ -244,7 +332,7 @@ class ScadaDataService
             $query->whereDate('timestamp_device', '<=', $endDate);
         }
 
-        // Apply search filter
+        // Apply search filter - Optimized with proper indexing consideration
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
                 $q->where('id', 'LIKE', "%{$search}%")
@@ -260,10 +348,20 @@ class ScadaDataService
             });
         }
 
-        // Apply sorting
+        // Apply sorting with validation
+        $allowedSortFields = ['id', 'timestamp_device', 'nama_group', 'temperature', 'humidity', 'pressure', 'rainfall'];
+        $allowedSortDirections = ['asc', 'desc'];
+
+        if (!in_array($sortField, $allowedSortFields)) {
+            $sortField = 'id';
+        }
+        if (!in_array($sortDirection, $allowedSortDirections)) {
+            $sortDirection = 'desc';
+        }
+
         $query->orderBy($sortField, $sortDirection);
 
-        return $query->limit($limit)->get();
+        return $query->paginate($limit, ['*'], 'page', $page);
     }
 
     /**
@@ -502,5 +600,151 @@ class ScadaDataService
         }
 
         return $stats;
+    }
+
+    /**
+     * Get database performance metrics and health status
+     */
+    public function getDatabaseHealth(): array
+    {
+        try {
+            $startTime = microtime(true);
+
+            // Check table size
+            $tableSize = DB::select("
+                SELECT
+                    ROUND(((data_length + index_length) / 1024 / 1024), 2) AS 'Size_MB'
+                FROM information_schema.tables
+                WHERE table_schema = DATABASE()
+                AND table_name = 'scada_data_wides'
+            ");
+
+            // Check record count
+            $totalRecords = ScadaDataWide::count();
+
+            // Check latest data age
+            $latestRecord = ScadaDataWide::select('timestamp_device')->orderBy('timestamp_device', 'desc')->first();
+            $dataAge = $latestRecord ? now()->diffInMinutes($latestRecord->timestamp_device) : null;
+
+            // Check data insertion rate (last hour)
+            $lastHourCount = ScadaDataWide::where('created_at', '>=', now()->subHour())->count();
+
+            $endTime = microtime(true);
+            $queryTime = round(($endTime - $startTime) * 1000, 2);
+
+            return [
+                'status' => 'healthy',
+                'table_size_mb' => $tableSize[0]->Size_MB ?? 0,
+                'total_records' => $totalRecords,
+                'latest_data_age_minutes' => $dataAge,
+                'insertion_rate_last_hour' => $lastHourCount,
+                'health_check_time_ms' => $queryTime,
+                'last_check' => now()->format('Y-m-d H:i:s'),
+                'recommendations' => $this->getHealthRecommendations($totalRecords, $dataAge, $lastHourCount)
+            ];
+        } catch (\Exception $e) {
+            Log::error('Database health check failed', ['error' => $e->getMessage()]);
+
+            return [
+                'status' => 'unhealthy',
+                'error' => $e->getMessage(),
+                'last_check' => now()->format('Y-m-d H:i:s')
+            ];
+        }
+    }
+
+    /**
+     * Get health recommendations based on metrics
+     */
+    private function getHealthRecommendations(int $totalRecords, ?int $dataAge, int $lastHourCount): array
+    {
+        $recommendations = [];
+
+        if ($totalRecords > 1000000) {
+            $recommendations[] = 'Consider implementing data archiving for records older than 1 year';
+        }
+
+        if ($dataAge > 60) {
+            $recommendations[] = 'Data is more than 1 hour old. Check data source connectivity';
+        }
+
+        if ($lastHourCount > 10000) {
+            $recommendations[] = 'High insertion rate detected. Monitor database performance';
+        }
+
+        if ($lastHourCount === 0) {
+            $recommendations[] = 'No new data in the last hour. Investigate data pipeline';
+        }
+
+        if (empty($recommendations)) {
+            $recommendations[] = 'All systems operating normally';
+        }
+
+        return $recommendations;
+    }
+
+    /**
+     * Optimize database queries with chunking for large datasets
+     */
+    public function processLargeDataset(array $payload, int $chunkSize = 1000): void
+    {
+        try {
+            $dataArray = $payload['DataArray'];
+            $totalChunks = ceil(count($dataArray) / $chunkSize);
+
+            Log::info('Processing large dataset with chunking', [
+                'total_records' => count($dataArray),
+                'chunk_size' => $chunkSize,
+                'total_chunks' => $totalChunks
+            ]);
+
+            for ($i = 0; $i < $totalChunks; $i++) {
+                $chunk = array_slice($dataArray, $i * $chunkSize, $chunkSize);
+
+                DB::transaction(function () use ($chunk) {
+                    $insertData = [];
+                    $now = now();
+
+                    foreach ($chunk as $dataGroup) {
+                        $dataToInsert = [
+                            'batch_id'         => Str::uuid(),
+                            'nama_group'       => $dataGroup['_groupTag'],
+                            'timestamp_device' => $dataGroup['_terminalTime'],
+                            'created_at'       => $now,
+                            'updated_at'       => $now,
+                        ];
+
+                        foreach ($dataGroup as $key => $value) {
+                            if (!str_starts_with($key, '_')) {
+                                $dataToInsert[$key] = is_numeric($value) ? (float) $value : null;
+                            }
+                        }
+
+                        $insertData[] = $dataToInsert;
+                    }
+
+                    if (!empty($insertData)) {
+                        DB::table('scada_data_wides')->insert($insertData);
+                    }
+                });
+
+                Log::info('Chunk processed successfully', [
+                    'chunk_number' => $i + 1,
+                    'chunk_size' => count($chunk),
+                    'progress' => round((($i + 1) / $totalChunks) * 100, 2) . '%'
+                ]);
+            }
+
+            Log::info('Large dataset processing completed successfully', [
+                'total_records' => count($dataArray),
+                'total_chunks' => $totalChunks
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Large dataset processing failed', [
+                'error' => $e->getMessage(),
+                'payload_size' => count($payload['DataArray'] ?? [])
+            ]);
+            throw $e;
+        }
     }
 }

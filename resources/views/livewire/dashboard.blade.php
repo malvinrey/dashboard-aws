@@ -1,5 +1,15 @@
 <div wire:poll.5s="updateData">
-    @if (!empty($metrics))
+    @if (isset($error))
+        <div class="error-message"
+            style="text-align: center; color: #dc3545; padding: 20px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 8px; margin: 20px;">
+            <h3>⚠️ Error Loading Dashboard</h3>
+            <p>{{ $error }}</p>
+            <button onclick="location.reload()"
+                style="background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+                Retry
+            </button>
+        </div>
+    @elseif (!empty($metrics))
         <div class="metric-grid-container">
 
             {{-- Kartu Kompas & Angin --}}
@@ -195,16 +205,16 @@
                     @if ($lastPayloadInfo)
                         <div class="info-row">
                             <span class="info-label">Group:</span>
-                            <span class="info-value">{{ $lastPayloadInfo->nama_group }}</span>
+                            <span class="info-value">{{ $lastPayloadInfo['group'] }}</span>
                         </div>
                         <div class="info-row">
                             <span class="info-label">Timestamp:</span>
                             <span
-                                class="info-value">{{ \Carbon\Carbon::parse($lastPayloadInfo->timestamp_device)->format('d M Y, H:i:s') }}</span>
+                                class="info-value">{{ \Carbon\Carbon::parse($lastPayloadInfo['timestamp'])->format('d M Y, H:i:s') }}</span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">Batch ID:</span>
-                            <span class="info-value batch-id">{{ $lastPayloadInfo->batch_id }}</span>
+                            <span class="info-label">Data Age:</span>
+                            <span class="info-value">{{ $lastPayloadInfo['data_age_seconds'] }} seconds</span>
                         </div>
                     @else
                         <p class="no-payload-text">No payload received yet.</p>
