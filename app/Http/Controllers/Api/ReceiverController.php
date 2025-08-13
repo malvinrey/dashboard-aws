@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessScadaDataJob;
 use App\Jobs\ProcessLargeScadaDatasetJob;
+use App\Services\ScadaBroadcastingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -16,6 +17,13 @@ class ReceiverController extends Controller
      * dan perlu diproses dengan job khusus
      */
     private const LARGE_DATASET_THRESHOLD = 5000;
+
+    protected $broadcastingService;
+
+    public function __construct(ScadaBroadcastingService $broadcastingService)
+    {
+        $this->broadcastingService = $broadcastingService;
+    }
 
     public function store(Request $request)
     {
@@ -63,6 +71,9 @@ class ReceiverController extends Controller
         }
 
         try {
+            // Broadcast real-time data untuk dashboard
+            $this->broadcastRealtimeData($request->input('DataArray'));
+
             // Tentukan job yang akan digunakan berdasarkan ukuran dataset
             if ($dataCount >= self::LARGE_DATASET_THRESHOLD) {
                 // Dataset besar: gunakan job khusus dengan chunking
@@ -125,6 +136,53 @@ class ReceiverController extends Controller
                 'error_code' => 'QUEUING_ERROR',
                 'data_count' => $dataCount
             ], 500);
+        }
+    }
+
+    /**
+     * Broadcast real-time data untuk dashboard
+     */
+    private function broadcastRealtimeData(array $dataArray): void
+    {
+        try {
+            if (empty($dataArray)) {
+                return;
+            }
+
+            // Ambil data terbaru untuk real-time broadcasting
+            $latestData = end($dataArray);
+
+            // Format data untuk broadcasting
+            $broadcastData = [
+                'timestamp' => $latestData['_terminalTime'] ?? now()->toISOString(),
+                'group_tag' => $latestData['_groupTag'] ?? 'unknown',
+                'temperature' => $latestData['temperature'] ?? null,
+                'humidity' => $latestData['humidity'] ?? null,
+                'pressure' => $latestData['pressure'] ?? null,
+                'rainfall' => $latestData['rainfall'] ?? null,
+                'wind_speed' => $latestData['wind_speed'] ?? null,
+                'wind_direction' => $latestData['wind_direction'] ?? null,
+                'par_sensor' => $latestData['par_sensor'] ?? null,
+                'solar_radiation' => $latestData['solar_radiation'] ?? null,
+                'data_count' => count($dataArray)
+            ];
+
+            // Broadcast data real-time dengan throttling
+            $this->broadcastingService->broadcastAggregatedData(
+                $broadcastData,
+                'scada-realtime',
+                100 // Throttle 100ms
+            );
+
+            Log::debug('Real-time data broadcasted', [
+                'group_tag' => $broadcastData['group_tag'],
+                'timestamp' => $broadcastData['timestamp']
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to broadcast real-time data', [
+                'error' => $e->getMessage(),
+                'data_count' => count($dataArray)
+            ]);
         }
     }
 

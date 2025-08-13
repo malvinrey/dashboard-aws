@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Events\ScadaDataReceived;
 use App\Services\ScadaDataService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -57,6 +58,9 @@ class ProcessScadaDataJob implements ShouldQueue
             // Proses data menggunakan service yang sudah ada
             $scadaDataService->processScadaPayload($this->payload);
 
+            // Broadcast event untuk real-time update
+            $this->broadcastProcessedData($scadaDataService);
+
             $processingTime = round((microtime(true) - $startTime) * 1000, 2);
 
             Log::info('SCADA data processing job completed successfully', [
@@ -79,6 +83,49 @@ class ProcessScadaDataJob implements ShouldQueue
 
             // Re-throw exception agar job bisa di-retry
             throw $e;
+        }
+    }
+
+    /**
+     * Broadcast processed data for real-time updates
+     */
+    protected function broadcastProcessedData(ScadaDataService $scadaDataService): void
+    {
+        try {
+            // Get latest data for broadcasting
+            $latestData = $scadaDataService->getLatestDataForTags([
+                'temperature',
+                'humidity',
+                'pressure',
+                'rainfall',
+                'wind_speed',
+                'wind_direction',
+                'par_sensor',
+                'solar_radiation'
+            ]);
+
+            if ($latestData) {
+                // Broadcast to main channel
+                ScadaDataReceived::dispatch($latestData, 'scada-data', $this->job->getJobId());
+
+                // Broadcast to real-time channel for immediate updates
+                ScadaDataReceived::dispatch($latestData, 'scada-realtime', $this->job->getJobId());
+
+                Log::info('SCADA data broadcasted successfully', [
+                    'job_id' => $this->job->getJobId(),
+                    'channels' => ['scada-data', 'scada-realtime'],
+                    'data_timestamp' => $latestData['timestamp'] ?? 'unknown'
+                ]);
+            } else {
+                Log::warning('No latest data available for broadcasting', [
+                    'job_id' => $this->job->getJobId()
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to broadcast SCADA data', [
+                'job_id' => $this->job->getJobId(),
+                'error' => $e->getMessage()
+            ]);
         }
     }
 

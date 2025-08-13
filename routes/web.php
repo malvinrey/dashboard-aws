@@ -37,3 +37,22 @@ Route::prefix('performance')->name('performance.')->group(function () {
     Route::get('/recommendations', [PerformanceController::class, 'getOptimizationRecommendations'])->name('recommendations');
     Route::post('/clear-cache', [PerformanceController::class, 'clearCache'])->name('clear-cache');
 });
+
+// Broadcasting routes (akan di-register otomatis oleh AppServiceProvider)
+// Route::get('/broadcasting/auth', [BroadcastingController::class, 'authenticate']);
+
+// WebSocket test routes
+Route::get('/websocket-test', function () {
+    return view('websocket-test');
+})->name('websocket-test');
+
+Route::get('/broadcast-test', function () {
+    // Test broadcasting
+    broadcast(new \App\Events\ScadaDataReceived([
+        'test' => true,
+        'message' => 'Test broadcast from route',
+        'timestamp' => now()->toISOString()
+    ], 'scada-test'));
+
+    return response()->json(['message' => 'Test broadcast sent']);
+})->name('broadcast-test');

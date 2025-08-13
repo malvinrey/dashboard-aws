@@ -4,12 +4,13 @@
 @endphp
 
 <div>
-    {{-- Sertakan file JavaScript Web Worker DAN file komponen Alpine --}}
+    {{-- Sertakan file JavaScript WebSocket dan komponen Alpine --}}
     @push('scripts')
-        <script src="{{ asset('js/sse-worker.js') }}" defer></script>
+        <script src="{{ asset('js/scada-websocket-client.js') }}" defer></script>
+        <script src="{{ asset('js/scada-chart-manager.js') }}" defer></script>
         <script src="{{ asset('js/analysis-chart-component.js') }}" defer></script>
         <script>
-            // Expose default tags from backend for initial SSE connection and UI rendering
+            // Expose default tags from backend for initial WebSocket connection and UI rendering
             window.ANALYSIS_DEFAULT_TAGS = @json($selectedTags);
             window.ANALYSIS_ALL_TAGS = @json($allTags);
         </script>
@@ -152,6 +153,88 @@
                 </div>
             </div>
         </div>
+
+        <!-- WebSocket Integration Script -->
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                // Initialize WebSocket client for real-time data
+                const wsClient = new ScadaWebSocketClient({
+                    url: 'ws://localhost:6001/app/scada-app',
+                    reconnectAttempts: 10,
+                    heartbeatInterval: 30000
+                });
+
+                // Initialize chart manager with throttling
+                const chartElement = document.getElementById('analysisChart');
+                const chartManager = new ScadaChartManager(chartElement, {
+                    maxDataPoints: 1000,
+                    updateInterval: 100,
+                    aggregationEnabled: true
+                });
+
+                // WebSocket event handlers
+                wsClient.onConnect = function() {
+                    console.log('WebSocket connected successfully');
+                    updateConnectionStatus('connected', 'Connected');
+                };
+
+                wsClient.onDisconnect = function() {
+                    console.log('WebSocket disconnected');
+                    updateConnectionStatus('disconnected', 'Disconnected');
+                };
+
+                wsClient.onMessage = function(data) {
+                    if (data.event === 'scada.data.received') {
+                        const scadaData = data.data;
+                        chartManager.addData(scadaData);
+
+                        // Update Livewire component
+                        if (window.Livewire) {
+                            window.Livewire.dispatch('chart-data-updated', scadaData);
+                        }
+
+                        updateLastUpdateTime();
+                    }
+                };
+
+                wsClient.onError = function(error) {
+                    console.error('WebSocket error:', error);
+                    updateConnectionStatus('error', 'Error');
+                };
+
+                // Update connection status UI
+                function updateConnectionStatus(status, text) {
+                    const indicator = document.getElementById('connectionIndicator');
+                    const statusText = document.getElementById('connectionStatus');
+
+                    if (indicator && statusText) {
+                        indicator.className = `w-3 h-3 rounded-full ${
+                            status === 'connected' ? 'bg-green-500' :
+                            status === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
+                        }`;
+                        statusText.textContent = text;
+                    }
+                }
+
+                // Update last update time
+                function updateLastUpdateTime() {
+                    const lastUpdateElement = document.getElementById('lastUpdateTime');
+                    if (lastUpdateElement) {
+                        lastUpdateElement.textContent = new Date().toLocaleTimeString();
+                    }
+                }
+
+                // Cleanup on page unload
+                window.addEventListener('beforeunload', function() {
+                    if (wsClient) {
+                        wsClient.disconnect();
+                    }
+                    if (chartManager) {
+                        chartManager.destroy();
+                    }
+                });
+            });
+        </script>
 
         <!-- Custom CSS -->
         <style>
