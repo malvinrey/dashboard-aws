@@ -8,6 +8,11 @@
     @push('scripts')
         <script src="{{ asset('js/sse-worker.js') }}" defer></script>
         <script src="{{ asset('js/analysis-chart-component.js') }}" defer></script>
+        <script>
+            // Expose default tags from backend for initial SSE connection and UI rendering
+            window.ANALYSIS_DEFAULT_TAGS = @json($selectedTags);
+            window.ANALYSIS_ALL_TAGS = @json($allTags);
+        </script>
     @endpush
 
     {{-- Panggil komponen Alpine dengan cara yang sangat bersih --}}
@@ -113,36 +118,14 @@
             <div class="mb-6">
                 <h3 class="text-lg font-semibold text-gray-800 mb-3">Channel Selection</h3>
                 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                    <label class="flex items-center space-x-2">
-                        <input type="checkbox" name="channelSelect" value="ch1" checked
-                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                        <span class="text-sm font-medium text-gray-700">CH1</span>
-                    </label>
-                    <label class="flex items-center space-x-2">
-                        <input type="checkbox" name="channelSelect" value="ch2" checked
-                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                        <span class="text-sm font-medium text-gray-700">CH2</span>
-                    </label>
-                    <label class="flex items-center space-x-2">
-                        <input type="checkbox" name="channelSelect" value="ch3" checked
-                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                        <span class="text-sm font-medium text-gray-700">CH3</span>
-                    </label>
-                    <label class="flex items-center space-x-2">
-                        <input type="checkbox" name="channelSelect" value="ch4"
-                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                        <span class="text-sm font-medium text-gray-700">CH4</span>
-                    </label>
-                    <label class="flex items-center space-x-2">
-                        <input type="checkbox" name="channelSelect" value="ch5"
-                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                        <span class="text-sm font-medium text-gray-700">CH5</span>
-                    </label>
-                    <label class="flex items-center space-x-2">
-                        <input type="checkbox" name="channelSelect" value="ch6"
-                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                        <span class="text-sm font-medium text-gray-700">CH6</span>
-                    </label>
+                    @foreach ($allTags as $tag)
+                        <label class="flex items-center space-x-2">
+                            <input type="checkbox" name="channelSelect" value="{{ $tag }}"
+                                @checked(in_array($tag, $selectedTags))
+                                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm font-medium text-gray-700">{{ Str::headline($tag) }}</span>
+                        </label>
+                    @endforeach
                 </div>
             </div>
 

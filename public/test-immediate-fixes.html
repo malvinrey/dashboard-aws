@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Test Immediate Fixes Implementation</title>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <script
+            defer
+            src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"
+        ></script>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 20px;
+                background-color: #f5f5f5;
+            }
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            }
+            .test-section {
+                margin: 20px 0;
+                padding: 15px;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+            .test-section h3 {
+                margin-top: 0;
+                color: #333;
+            }
+            .status {
+                padding: 10px;
+                margin: 10px 0;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            .status.success {
+                background-color: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            .status.error {
+                background-color: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+            }
+            .status.info {
+                background-color: #d1ecf1;
+                color: #0c5460;
+                border: 1px solid #bee5eb;
+            }
+            .chart-container {
+                width: 100%;
+                height: 400px;
+                border: 1px solid #ddd;
+                margin: 20px 0;
+            }
+            .controls {
+                display: flex;
+                gap: 10px;
+                margin: 20px 0;
+                flex-wrap: wrap;
+            }
+            button {
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 14px;
+            }
+            .btn-primary {
+                background-color: #007bff;
+                color: white;
+            }
+            .btn-success {
+                background-color: #28a745;
+                color: white;
+            }
+            .btn-danger {
+                background-color: #dc3545;
+                color: white;
+            }
+            .btn-warning {
+                background-color: #ffc107;
+                color: #212529;
+            }
+            .metrics {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+                margin: 20px 0;
+            }
+            .metric-card {
+                background: #f8f9fa;
+                padding: 15px;
+                border-radius: 5px;
+                border: 1px solid #dee2e6;
+            }
+            .metric-value {
+                font-size: 24px;
+                font-weight: bold;
+                color: #007bff;
+            }
+            .metric-label {
+                color: #6c757d;
+                font-size: 14px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Test Immediate Fixes Implementation</h1>
+
+            <div class="test-section">
+                <h3>Implementation Status</h3>
+                <div id="implementationStatus">
+                    <div class="status info">Checking implementation...</div>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h3>Performance Metrics</h3>
+                <div class="metrics">
+                    <div class="metric-card">
+                        <div class="metric-value" id="renderCount">0</div>
+                        <div class="metric-label">Render Count</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="dataReceived">0</div>
+                        <div class="metric-label">Data Received</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="memoryUsage">0 MB</div>
+                        <div class="metric-label">Memory Usage</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="avgRenderTime">0 ms</div>
+                        <div class="metric-label">Avg Render Time</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h3>Chart Display</h3>
+                <div id="testChart" class="chart-container"></div>
+            </div>
+
+            <div class="test-section">
+                <h3>Test Controls</h3>
+                <div class="controls">
+                    <button class="btn-primary" onclick="startThrottlingTest()">
+                        Start Throttling Test
+                    </button>
+                    <button class="btn-success" onclick="startDataBufferTest()">
+                        Start Buffer Test
+                    </button>
+                    <button class="btn-warning" onclick="startMemoryTest()">
+                        Start Memory Test
+                    </button>
+                    <button class="btn-danger" onclick="stopAllTests()">
+                        Stop All Tests
+                    </button>
+                    <button class="btn-warning" onclick="resetChart()">
+                        Reset Chart
+                    </button>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h3>Test Status</h3>
+                <div id="testStatus">
+                    <div class="status info">No tests running</div>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h3>Test Results</h3>
+                <div id="testResults">
+                    <div class="status info">No tests run yet</div>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h3>Console Log</h3>
+                <div
+                    id="consoleLog"
+                    style="
+                        background: #f8f9fa;
+                        padding: 10px;
+                        border-radius: 5px;
+                        font-family: monospace;
+                        max-height: 200px;
+                        overflow-y: auto;
+                    "
+                >
+                    <div>Console output will appear here...</div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // Override console.log to capture output
+            const originalConsoleLog = console.log;
+            const originalConsoleWarn = console.warn;
+            const originalConsoleError = console.error;
+
+            function addToLog(message, type = "log") {
+                const logDiv = document.getElementById("consoleLog");
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement("div");
+                logEntry.style.color =
+                    type === "error"
+                        ? "#dc3545"
+                        : type === "warn"
+                        ? "#ffc107"
+                        : "#007bff";
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                logDiv.appendChild(logEntry);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            }
+
+            console.log = function (...args) {
+                originalConsoleLog.apply(console, args);
+                addToLog(args.join(" "), "log");
+            };
+
+            console.warn = function (...args) {
+                originalConsoleWarn.apply(console, args);
+                addToLog(args.join(" "), "warn");
+            };
+
+            console.error = function (...args) {
+                originalConsoleError.apply(console, args);
+                addToLog(args.join(" "), "error");
+            };
+
+            // Test variables
+            let throttlingTestInterval = null;
+            let bufferTestInterval = null;
+            let memoryTestInterval = null;
+
+            // Initialize the test page
+            document.addEventListener("DOMContentLoaded", function () {
+                console.log("Test page loaded, checking implementation...");
+                checkImplementation();
+                initializeChart();
+                startPerformanceMonitoring();
+            });
+
+            function checkImplementation() {
+                const statusDiv = document.getElementById(
+                    "implementationStatus"
+                );
+                let status = "";
+
+                // Check if classes are available
+                if (typeof ChartThrottler !== "undefined") {
+                    status +=
+                        '<div class="status success">✓ ChartThrottler class available</div>';
+                } else {
+                    status +=
+                        '<div class="status error">✗ ChartThrottler class not available</div>';
+                }
+
+                if (typeof DataBuffer !== "undefined") {
+                    status +=
+                        '<div class="status success">✓ DataBuffer class available</div>';
+                } else {
+                    status +=
+                        '<div class="status error">✗ DataBuffer class not available</div>';
+                }
+
+                if (typeof SSEManager !== "undefined") {
+                    status +=
+                        '<div class="status success">✓ SSEManager class available</div>';
+                } else {
+                    status +=
+                        '<div class="status error">✗ SSEManager class not available</div>';
+                }
+
+                if (typeof ChartDataManager !== "undefined") {
+                    status +=
+                        '<div class="status success">✓ ChartDataManager class available</div>';
+                } else {
+                    status +=
+                        '<div class="status error">✗ ChartDataManager class not available</div>';
+                }
+
+                if (typeof PerformanceTracker !== "undefined") {
+                    status +=
+                        '<div class="status success">✓ PerformanceTracker class available</div>';
+                } else {
+                    status +=
+                        '<div class="status error">✗ PerformanceTracker class not available</div>';
+                }
+
+                statusDiv.innerHTML = status;
+            }
+
+            function initializeChart() {
+                const layout = {
+                    title: "Test Chart for Immediate Fixes",
+                    xaxis: { title: "Time" },
+                    yaxis: { title: "Value" },
+                    plot_bgcolor: "#ffffff",
+                    paper_bgcolor: "#ffffff",
+                };
+
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                };
+
+                // Initialize with an empty trace so we can extend it later
+                const initialTrace = {
+                    x: [],
+                    y: [],
+                    mode: "lines",
+                    name: "Test Data",
+                    line: { color: "#1f77b4", width: 2 },
+                    type: "scatter",
+                };
+
+                Plotly.newPlot("testChart", [initialTrace], layout, config);
+            }
+
+            function startPerformanceMonitoring() {
+                setInterval(() => {
+                    // Update metrics display
+                    if (window.performanceTracker) {
+                        const metrics = window.performanceTracker.metrics;
+                        document.getElementById("renderCount").textContent =
+                            metrics.renderCount;
+                        document.getElementById("dataReceived").textContent =
+                            metrics.dataReceived;
+                        document.getElementById("avgRenderTime").textContent =
+                            Math.round(metrics.averageRenderTime) + " ms";
+                    }
+
+                    // Update memory usage
+                    if (performance.memory) {
+                        const memoryMB = Math.round(
+                            performance.memory.usedJSHeapSize / 1024 / 1024
+                        );
+                        document.getElementById("memoryUsage").textContent =
+                            memoryMB + " MB";
+                    }
+                }, 1000);
+            }
+
+            function startThrottlingTest() {
+                if (throttlingTestInterval) {
+                    clearInterval(throttlingTestInterval);
+                }
+
+                // Reset chart for new test
+                resetChart();
+
+                console.log("Starting throttling test...");
+                updateTestStatus("Throttling test running...", "info");
+                addTestResult(
+                    "Throttling test started - sending 100 data points at 10ms intervals"
+                );
+
+                let count = 0;
+                throttlingTestInterval = setInterval(() => {
+                    count++;
+
+                    // Simulate high-frequency data
+                    const testData = {
+                        timestamp: Date.now(),
+                        value: Math.random() * 100,
+                        channel: "CH1",
+                    };
+
+                    // This should trigger throttling
+                    if (window.chartThrottler) {
+                        window.chartThrottler.throttleUpdate(
+                            testData,
+                            (throttledData) => {
+                                console.log(
+                                    `Throttled update ${count}:`,
+                                    throttledData
+                                );
+                                updateChart(testData);
+                            }
+                        );
+                    }
+
+                    if (count >= 100) {
+                        clearInterval(throttlingTestInterval);
+                        throttlingTestInterval = null;
+                        updateTestStatus(
+                            "Throttling test completed",
+                            "success"
+                        );
+                        addTestResult(
+                            "Throttling test completed - check console for throttled updates"
+                        );
+                    }
+                }, 10); // 10ms = 100 updates per second
+            }
+
+            function startDataBufferTest() {
+                if (bufferTestInterval) {
+                    clearInterval(bufferTestInterval);
+                }
+
+                // Reset chart for new test
+                resetChart();
+
+                console.log("Starting data buffer test...");
+                addTestResult(
+                    "Buffer test started - testing data buffering and flushing"
+                );
+
+                let count = 0;
+                bufferTestInterval = setInterval(() => {
+                    count++;
+
+                    const testData = {
+                        timestamp: Date.now(),
+                        value: Math.random() * 100,
+                        channel: "CH1",
+                    };
+
+                    // This should trigger buffering
+                    if (window.dataBuffer) {
+                        window.dataBuffer.addData(testData);
+                    }
+
+                    if (count >= 200) {
+                        clearInterval(bufferTestInterval);
+                        bufferTestInterval = null;
+                        addTestResult(
+                            "Buffer test completed - check console for buffer operations"
+                        );
+                    }
+                }, 50); // 50ms = 20 updates per second
+            }
+
+            function startMemoryTest() {
+                if (memoryTestInterval) {
+                    clearInterval(memoryTestInterval);
+                }
+
+                // Reset chart for new test
+                resetChart();
+
+                console.log("Starting memory test...");
+                addTestResult("Memory test started - monitoring memory usage");
+
+                let count = 0;
+                memoryTestInterval = setInterval(() => {
+                    count++;
+
+                    // Create some data to test memory management
+                    const testData = {
+                        timestamp: Date.now(),
+                        value: Math.random() * 100,
+                        channel: "CH1",
+                        largeData: new Array(1000).fill(Math.random()),
+                    };
+
+                    if (window.chartDataManager) {
+                        window.chartDataManager.addData(testData);
+                    }
+
+                    if (count >= 1000) {
+                        clearInterval(memoryTestInterval);
+                        memoryTestInterval = null;
+                        addTestResult(
+                            "Memory test completed - check memory usage metrics"
+                        );
+                    }
+                }, 100); // 100ms = 10 updates per second
+            }
+
+            function stopAllTests() {
+                if (throttlingTestInterval) {
+                    clearInterval(throttlingTestInterval);
+                    throttlingTestInterval = null;
+                }
+                if (bufferTestInterval) {
+                    clearInterval(bufferTestInterval);
+                    bufferTestInterval = null;
+                }
+                if (memoryTestInterval) {
+                    clearInterval(memoryTestInterval);
+                    memoryTestInterval = null;
+                }
+
+                updateTestStatus("All tests stopped", "info");
+                addTestResult("All tests stopped");
+                console.log("All tests stopped");
+            }
+
+            function resetChart() {
+                try {
+                    // Clear existing data
+                    Plotly.restyle(
+                        "testChart",
+                        {
+                            x: [[]],
+                            y: [[]],
+                        },
+                        [0]
+                    );
+
+                    // Reset layout
+                    Plotly.relayout("testChart", {
+                        "xaxis.range": [null, null],
+                    });
+
+                    console.log("Chart reset for new test");
+                } catch (error) {
+                    console.error("Error resetting chart:", error);
+                }
+            }
+
+            function updateChart(data) {
+                try {
+                    // Convert timestamp to readable format
+                    const time = new Date(data.timestamp).toLocaleTimeString();
+
+                    const update = {
+                        x: [[time]],
+                        y: [[data.value]],
+                    };
+
+                    // Extend the existing trace at index 0
+                    Plotly.extendTraces("testChart", update, [0]);
+
+                    // Auto-resize the chart to fit new data
+                    Plotly.relayout("testChart", {
+                        "xaxis.range": [
+                            Math.min(
+                                ...document.getElementById("testChart").data[0]
+                                    .x
+                            ),
+                            Math.max(
+                                ...document.getElementById("testChart").data[0]
+                                    .x
+                            ),
+                        ],
+                    });
+                } catch (error) {
+                    console.error("Error updating chart:", error);
+                }
+            }
+
+            function updateTestStatus(message, type = "info") {
+                const statusDiv = document.getElementById("testStatus");
+                statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+            }
+
+            function addTestResult(message) {
+                const resultsDiv = document.getElementById("testResults");
+                const resultEntry = document.createElement("div");
+                resultEntry.className = "status info";
+                resultEntry.textContent = message;
+                resultsDiv.appendChild(resultEntry);
+            }
+
+            // Initialize test components when page loads
+            window.addEventListener("load", function () {
+                // Create test instances
+                window.chartThrottler = new ChartThrottler(100);
+                window.dataBuffer = new DataBuffer(50, 1000);
+                window.chartDataManager = new ChartDataManager(1000, 30000);
+                window.performanceTracker = new PerformanceTracker();
+
+                // Set up buffer callback
+                window.dataBuffer.setFlushCallback((bufferedData) => {
+                    console.log(`Buffer flushed: ${bufferedData.length} items`);
+                    addTestResult(
+                        `Buffer flushed: ${bufferedData.length} items`
+                    );
+                });
+
+                console.log("Test components initialized");
+                addTestResult("Test components initialized successfully");
+
+                // Test the immediate fixes with some sample data
+                setTimeout(() => {
+                    testWithSampleData();
+                }, 2000);
+            });
+
+            // Test function to verify immediate fixes work with sample data
+            function testWithSampleData() {
+                console.log("Testing immediate fixes with sample data...");
+
+                // Create sample data similar to what the backend might send
+                const sampleData = [
+                    {
+                        time_bucket: "2025-01-13 10:00:00",
+                        ch1: 25.5,
+                        ch2: 30.2,
+                        ch3: 15.8,
+                    },
+                    {
+                        time_bucket: "2025-01-13 10:01:00",
+                        ch1: 26.1,
+                        ch2: 29.8,
+                        ch3: 16.2,
+                    },
+                    {
+                        time_bucket: "2025-01-13 10:02:00",
+                        ch1: 24.9,
+                        ch2: 31.1,
+                        ch3: 15.5,
+                    },
+                ];
+
+                // Test data buffering
+                sampleData.forEach((data, index) => {
+                    setTimeout(() => {
+                        window.dataBuffer.addData(data);
+                        console.log(`Added sample data ${index + 1}:`, data);
+                    }, index * 100);
+                });
+
+                addTestResult(
+                    "Sample data test completed - check console for buffer operations"
+                );
+            }
+        </script>
+
+        <!-- Load the immediate fixes implementation -->
+        <script src="js/analysis-chart-component.js"></script>
+    </body>
+</html>
