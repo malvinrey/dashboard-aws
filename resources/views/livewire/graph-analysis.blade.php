@@ -1,1091 +1,255 @@
 @php
-    // Logika untuk menentukan tanggal default
     $endDate = now()->toDateTimeString();
     $startDate = now()->subDay()->toDateTimeString();
 @endphp
 
-<div data-selected-tags="{{ json_encode($selectedTags) }}" data-interval="{{ $interval }}"
-    data-realtime-enabled="{{ $realtimeEnabled ? 'true' : 'false' }}" {{-- Alpine.js component untuk mengelola state dan logic --}} {{-- SOLUSI DEFINITIF: Menggunakan Web Worker untuk koneksi SSE yang stabil --}}
-    {{-- Koneksi SSE akan tetap aktif bahkan saat tab tidak terlihat --}} x-data="{
-        // State variables untuk Web Worker
-        sseWorker: null, // Instance Web Worker untuk SSE
-        sseConnectionStatus: 'disconnected', // Status koneksi SSE
-        lastSuccessfulPollTimestamp: Date.now(), // Timestamp polling terakhir
-        connectionCheckInterval: null, // Interval untuk cek koneksi
-        lastKnownTimestamp: null, // Timestamp data terakhir
-
-        // Initialize component
-        initComponent() {
-            console.log('Initializing Alpine component...');
-
-            // Tambahkan class loading ke body untuk mencegah scroll
-            document.body.classList.add('loading');
-
-            // Setup event listeners
-            this.setupEventListeners();
-
-            // Mulai proses loading komponen secara berurutan
-            this.loadComponentsSequentially();
-
-            // ✅ PERBAIKAN: Aktifkan fallback untuk historical data overlay
-            this.ensureHistoricalOverlayHidden();
-        },
-
-        // Load komponen secara berurutan dengan delay untuk memastikan semua siap
-        async loadComponentsSequentially() {
-            try {
-                console.log('🔄 Starting sequential component loading...');
-
-                // Aktifkan fallback untuk memastikan overlay tidak stuck
-                this.ensureOverlayHidden();
-
-                // Step 1: Setup SSE connection
-                await this.delay(500);
-                this.startSseConnection();
-                console.log('✅ SSE connection setup completed');
-
-                // Step 2: Start connection checker
-                await this.delay(300);
-                this.startConnectionChecker();
-                console.log('✅ Connection checker started');
-
-                // Step 3: Wait for Select2 to be ready
-                await this.waitForSelect2();
-                console.log('✅ Select2 initialization completed');
-
-                // Step 4: Wait for interval buttons to be ready
-                await this.waitForIntervalButtons();
-                console.log('✅ Interval buttons setup completed');
-
-                // Step 5: Dispatch loadChartData event
-                await this.delay(200);
-                window.Livewire.dispatch('loadChartData');
-                console.log('✅ Chart data loading initiated');
-
-                // Step 6: Final delay untuk memastikan semua komponen benar-benar siap
-                await this.delay(500);
-
-                // Hide loading overlay
-                this.hideMainLoadingOverlay();
-                console.log('🎉 All components loaded successfully!');
-
-            } catch (error) {
-                console.error('❌ Error during component loading:', error);
-                // Tetap hide overlay meskipun ada error
-                this.hideMainLoadingOverlay();
-            }
-        },
-
-        // Utility function untuk delay
-        delay(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        },
-
-        // Wait for Select2 to be ready
-        waitForSelect2() {
-            return new Promise((resolve) => {
-                const checkSelect2 = () => {
-                    if (typeof $ !== 'undefined' && $('#metrics-select2').length > 0) {
-                        resolve();
-                    } else {
-                        setTimeout(checkSelect2, 100);
-                    }
-                };
-                checkSelect2();
-            });
-        },
-
-        // Wait for interval buttons to be ready
-        waitForIntervalButtons() {
-            return new Promise((resolve) => {
-                const checkButtons = () => {
-                    const buttons = document.getElementById('interval-buttons');
-                    if (buttons && buttons.querySelectorAll('button').length > 0) {
-                        resolve();
-                    } else {
-                        setTimeout(checkButtons, 100);
-                    }
-                };
-                checkButtons();
-            });
-        },
-
-        // Hide main loading overlay
-        hideMainLoadingOverlay() {
-            const overlay = document.getElementById('main-loading-overlay');
-            if (overlay) {
-                overlay.classList.add('hidden');
-                // Remove loading class from body
-                document.body.classList.remove('loading');
-
-                // Remove overlay completely after animation
-                setTimeout(() => {
-                    if (overlay.parentNode) {
-                        overlay.parentNode.removeChild(overlay);
-                    }
-                }, 300);
-            }
-        },
-
-        // Fallback untuk memastikan overlay loading selalu berfungsi
-        ensureOverlayHidden() {
-            // Force hide overlay setelah 10 detik sebagai fallback
-            setTimeout(() => {
-                if (document.getElementById('main-loading-overlay')) {
-                    console.log('⚠️ Force hiding main overlay after timeout');
-                    this.hideMainLoadingOverlay();
-                }
-            }, 10000);
-        },
-
-        // ✅ PERBAIKAN: Fungsi untuk menyembunyikan overlay loading historical data
-        hideHistoricalDataOverlay() {
-            console.log('🔄 Hiding historical data loading overlay...');
-
-            // Cari semua overlay loading yang aktif untuk historical data
-            const historicalOverlays = document.querySelectorAll('.loading-overlay[wire\\:loading]');
-
-            historicalOverlays.forEach(overlay => {
-                if (overlay.style.display === 'flex' || overlay.style.display === '') {
-                    console.log('✅ Hiding historical data overlay');
-                    overlay.style.display = 'none';
-
-                    // Tambahkan animasi fade out
-                    overlay.style.opacity = '0';
-                    overlay.style.transition = 'opacity 0.3s ease-out';
-
-                    // Remove overlay setelah animasi selesai
-                    setTimeout(() => {
-                        if (overlay.parentNode) {
-                            overlay.style.display = 'none';
-                        }
-                    }, 300);
-                }
-            });
-        },
-
-        // ✅ PERBAIKAN: Fallback untuk memastikan overlay historical data tidak stuck
-        ensureHistoricalOverlayHidden() {
-            // Force hide overlay historical data setelah 15 detik sebagai fallback
-            setTimeout(() => {
-                const historicalOverlays = document.querySelectorAll('.loading-overlay[wire\\:loading]');
-                if (historicalOverlays.length > 0) {
-                    console.log('⚠️ Force hiding historical data overlay after timeout');
-                    this.hideHistoricalDataOverlay();
-                }
-            }, 15000);
-        },
-
-        // Setup all event listeners
-        setupEventListeners() {
-            // Chart data updated event
-            document.addEventListener('chart-data-updated', (event) => {
-                console.log('chart-data-updated event received:', event.detail);
-                this.handleChartDataUpdated(event.detail);
-            });
-
-            // ✅ PERBAIKAN: Event listener untuk Livewire loading events
-            document.addEventListener('livewire:loading', (event) => {
-                console.log('🔄 Livewire loading started:', event.detail);
-            });
-
-            document.addEventListener('livewire:loaded', (event) => {
-                console.log('✅ Livewire loading completed:', event.detail);
-
-                // Sembunyikan overlay loading historical data jika ada
-                this.hideHistoricalDataOverlay();
-            });
-
-            document.addEventListener('livewire:error', (event) => {
-                console.error('❌ Livewire error occurred:', event.detail);
-
-                // Sembunyikan overlay loading historical data meskipun ada error
-                this.hideHistoricalDataOverlay();
-            });
-
-            // Historical data prepended event
-            document.addEventListener('historical-data-prepended-second', (event) => {
-                this.handleHistoricalDataPrepended(event.detail);
-            });
-
-            // Show warning event
-            document.addEventListener('show-warning', (event) => {
-                this.showWarning(event.detail.message);
-            });
-
-            // Update last point event
-            document.addEventListener('update-last-point', (event) => {
-                console.log('Update last point event received:', event.detail);
-                this.handleChartUpdate(event.detail.data);
-            });
-
-            // Realtime toggle change
-            const realtimeToggle = document.getElementById('realtime-toggle');
-            if (realtimeToggle) {
-                realtimeToggle.addEventListener('change', (event) => {
-                    console.log('Realtime toggle changed:', event.target.checked);
-                    if (event.target.checked) {
-                        this.lastSuccessfulPollTimestamp = Date.now();
-                        this.startSseConnection();
-                    } else {
-                        if (this.sseWorker) {
-                            this.sseWorker.terminate();
-                            this.sseWorker = null;
-                            console.log('SSE Worker stopped');
-                        }
-                    }
-                });
-            }
-
-            // Chart data updated - restart SSE
-            document.addEventListener('chart-data-updated', () => {
-                console.log('Chart data updated, restarting SSE...');
-                this.startSseConnection();
-            });
-        },
-
-        // Handle chart data updated
-        handleChartDataUpdated(chartData) {
-            const warningBox = document.getElementById('chart-warning');
-            if (warningBox) warningBox.style.display = 'none';
-
-            if (chartData && chartData.data && chartData.data.length > 0) {
-                console.log('Rendering chart with data:', chartData);
-                const plotlyData = chartData.data.map(trace => ({
-                    ...trace,
-                    x: trace.x.map(dateStr => new Date(dateStr)),
-                }));
-                this.renderChart(plotlyData, chartData.layout);
-                this.updateLastKnownTimestamp();
-                console.log('Chart rendered successfully');
-            } else {
-                console.log('No chart data available, rendering empty chart');
-                this.renderChart([], {
-                    title: 'No data to display. Please check filters.'
-                });
-                this.updateLastKnownTimestamp();
-            }
-        },
-
-        // Handle historical data prepended
-        handleHistoricalDataPrepended(chartData) {
-            const plotlyChart = document.getElementById('plotlyChart');
-            if (chartData && chartData.data && chartData.data.length > 0 && plotlyChart && plotlyChart.data) {
-                chartData.data.forEach((newTrace, traceIndex) => {
-                    if (traceIndex < plotlyChart.data.length) {
-                        const newDates = newTrace.x.map(dateStr => new Date(dateStr));
-                        if (newDates.length > 0) {
-                            Plotly.prependTraces('plotlyChart', {
-                                x: [newDates],
-                                y: [newTrace.y]
-                            }, [traceIndex]);
-                        }
-                    }
-                });
-            }
-        },
-
-        // Show warning
-        showWarning(message) {
-            const warningBox = document.getElementById('chart-warning');
-            const warningMessage = document.getElementById('warning-message');
-            if (warningBox && warningMessage) {
-                warningMessage.textContent = message;
-                warningBox.style.display = 'block';
-            }
-        },
-
-        // Render chart using Plotly
-        renderChart(plotlyData, layout) {
-            console.log('renderChart called with:', { plotlyData, layout });
-            const chartContainer = document.getElementById('plotlyChart');
-            if (!chartContainer) {
-                console.error('Chart container not found!');
-                return;
-            }
-            console.log('Chart container found, rendering with Plotly...');
-            Plotly.react('plotlyChart', plotlyData, layout, {
-                responsive: true,
-                displaylogo: false
-            });
-            console.log('Plotly.react completed');
-        },
-
-        // Update last known timestamp
-        updateLastKnownTimestamp() {
-            const plotlyChart = document.getElementById('plotlyChart');
-            if (plotlyChart && plotlyChart.data && plotlyChart.data.length > 0) {
-                let maxTimestamp = 0;
-                plotlyChart.data.forEach(trace => {
-                    if (trace.x && trace.x.length > 0) {
-                        const lastTimestampInTrace = new Date(trace.x[trace.x.length - 1]).getTime();
-                        if (lastTimestampInTrace > maxTimestamp) {
-                            maxTimestamp = lastTimestampInTrace;
-                        }
-                    }
-                });
-                if (maxTimestamp > 0) {
-                    const lastDate = new Date(maxTimestamp);
-                    this.lastKnownTimestamp = lastDate.toISOString().slice(0, 19).replace('T', ' ');
-                } else {
-                    this.lastKnownTimestamp = null;
-                }
-            } else {
-                this.lastKnownTimestamp = null;
-            }
-        },
-
-        // Start SSE connection using Web Worker
-        startSseConnection() {
-            console.log('Starting SSE connection using Web Worker...');
-
-            // Hentikan worker lama jika ada untuk mencegah duplikasi
-            if (this.sseWorker) {
-                this.sseWorker.terminate();
-                this.sseWorker = null;
-            }
-
-            const container = document.querySelector('[data-selected-tags]');
-            const selectedTags = container ? JSON.parse(container.dataset.selectedTags || '[]') : [];
-            const interval = container ? container.dataset.interval || 'hour' : 'hour';
-            const realtimeToggle = document.getElementById('realtime-toggle');
-
-            if (!selectedTags || selectedTags.length === 0 || !realtimeToggle || !realtimeToggle.checked) {
-                console.log('SSE connection skipped - conditions not met');
-                return;
-            }
-
-            const params = new URLSearchParams({ interval: interval });
-            selectedTags.forEach(tag => params.append('tags[]', tag));
-            const sseUrl = `/api/sse/stream?${params.toString()}`;
-
-            try {
-                // Buat instance worker baru dari file eksternal
-                this.sseWorker = new Worker('/js/sse-worker.js');
-                const statusDot = document.querySelector('.realtime-status-dot');
-
-                // Dengarkan pesan yang dikirim KEMBALI DARI WORKER
-                this.sseWorker.onmessage = (e) => {
-                    console.log('SSE Worker message received:', e.data);
-                    this.handleWorkerMessage(e.data, statusDot);
-                };
-
-                this.sseWorker.onerror = (error) => {
-                    console.error('SSE Worker error:', error);
-                    statusDot?.classList.add('stale');
-                    this.sseConnectionStatus = 'error';
-                };
-
-                // Kirim URL SSE ke worker agar ia bisa memulai koneksi
-                this.sseWorker.postMessage({
-                    type: 'start',
-                    url: sseUrl,
-                    tags: selectedTags,
-                    interval: interval
-                });
-
-                console.log('SSE Worker started successfully with URL:', sseUrl);
-
-            } catch (error) {
-                console.error('Failed to create SSE Worker:', error);
-                const statusDot = document.querySelector('.realtime-status-dot');
-                statusDot?.classList.add('stale');
-                this.sseConnectionStatus = 'error';
-            }
-        },
-
-        // Handle worker messages
-        handleWorkerMessage(data, statusDot) {
-            console.log('Processing worker message:', data.type, data);
-
-            switch (data.type) {
-                case 'status':
-                    if (data.status === 'connected') {
-                        this.sseConnectionStatus = 'connected';
-                        statusDot?.classList.remove('stale');
-                        statusDot?.classList.add('connected');
-                        console.log('✅ SSE connection established via Worker');
-                    } else if (data.status === 'stopped') {
-                        this.sseConnectionStatus = 'stopped';
-                        statusDot?.classList.remove('connected');
-                        console.log('⏹️ SSE connection stopped via Worker');
-                    }
-                    break;
-
-                case 'data':
-                    window.lastSuccessfulPollTimestamp = Date.now();
-                    console.log('📊 Real-time data received via Worker:', data.data);
-                    this.handleChartUpdate(data.data);
-                    break;
-
-                case 'connected':
-                    console.log('🔗 SSE connected event via Worker:', data.data);
-                    break;
-
-                case 'heartbeat':
-                    console.log('💓 SSE heartbeat received via Worker');
-                    window.lastSuccessfulPollTimestamp = Date.now();
-                    break;
-
-                case 'error':
-                    console.error('❌ SSE error via Worker:', data.error);
-                    statusDot?.classList.add('stale');
-                    this.sseConnectionStatus = 'error';
-                    break;
-
-                default:
-                    console.log('⚠️ Unknown worker message type:', data.type);
-                    break;
-            }
-        },
-
-        // Handle chart updates
-        handleChartUpdate(newData) {
-            if (!newData || !newData.metrics || !newData.timestamp) {
-                console.log('Invalid data format received by handleChartUpdate:', newData);
-                return;
-            }
-
-            const plotlyChart = document.getElementById('plotlyChart');
-            if (!plotlyChart || !plotlyChart.data || plotlyChart.data.length === 0) {
-                console.log('No chart data available in handleChartUpdate');
-                return;
-            }
-
-            console.log('handleChartUpdate processing data:', newData);
-            const newPointTimestamp = new Date(newData.timestamp);
-            let needsRedraw = false;
-
-            Object.entries(newData.metrics).forEach(([metricName, newValue]) => {
-                const formattedMetricName = metricName.charAt(0).toUpperCase() + metricName.slice(1).replace(/_/g, ' ');
-                const traceIndex = plotlyChart.data.findIndex(trace => trace.name === formattedMetricName);
-
-                if (traceIndex !== -1) {
-                    const currentTrace = plotlyChart.data[traceIndex];
-                    if (!currentTrace.x || currentTrace.x.length === 0) {
-                        console.log(`Trace ${formattedMetricName} is empty, skipping`);
-                        return;
-                    }
-
-                    const lastIndex = currentTrace.x.length - 1;
-                    const lastValue = currentTrace.y[lastIndex];
-
-                    if (lastValue === null) {
-                        currentTrace.x[lastIndex] = newPointTimestamp;
-                        currentTrace.y[lastIndex] = newValue;
-                        needsRedraw = true;
-                        console.log(`Resumed line for ${formattedMetricName} after gap.`);
-                    } else {
-                        const lastChartTimestamp = new Date(currentTrace.x[lastIndex]);
-
-                        if (newPointTimestamp.getTime() === lastChartTimestamp.getTime()) {
-                            currentTrace.y[lastIndex] = newValue;
-                            needsRedraw = true;
-                            console.log(`Updated existing point for ${formattedMetricName}`);
-                        } else if (newPointTimestamp.getTime() > lastChartTimestamp.getTime()) {
-                            Plotly.extendTraces('plotlyChart', {
-                                x: [
-                                    [newPointTimestamp]
-                                ],
-                                y: [
-                                    [newValue]
-                                ]
-                            }, [traceIndex], 60); // MAX_POINTS_PER_TRACE = 60
-                            console.log(`Added new point for ${formattedMetricName}`);
-                        }
-                    }
-                } else {
-                    console.log(`Trace not found for metric: ${formattedMetricName}`);
-                }
-            });
-
-            if (needsRedraw) {
-                Plotly.redraw('plotlyChart');
-                console.log('Chart redrawn');
-            }
-            this.updateLastKnownTimestamp();
-        },
-
-        // Start connection checker
-        startConnectionChecker() {
-            if (this.connectionCheckInterval) {
-                clearInterval(this.connectionCheckInterval);
-            }
-
-            this.connectionCheckInterval = setInterval(() => {
-                const realtimeToggle = document.getElementById('realtime-toggle');
-                const statusDot = document.querySelector('.realtime-status-dot');
-
-                if (!realtimeToggle || !realtimeToggle.checked || !statusDot) {
-                    statusDot?.classList.remove('stale');
-                    return;
-                }
-
-                const secondsSinceLastPoll = (Date.now() - this.lastSuccessfulPollTimestamp) / 1000;
-                const STALE_THRESHOLD_SECONDS = 15;
-
-                if (secondsSinceLastPoll > STALE_THRESHOLD_SECONDS) {
-                    statusDot.classList.add('stale');
-                } else {
-                    statusDot.classList.remove('stale');
-                }
-            }, 2000);
-        }
-    }" {{-- Initialize component when Alpine is ready --}} x-init="initComponent()">
-    {{-- Indikator loading real-time yang tidak mengganggu dari wire:poll --}}
-    <div title="{{ $realtimeEnabled ? 'Real-time updates active' : 'Real-time updates disabled' }}"
-        class="realtime-status-dot {{ $realtimeEnabled ? 'connected' : 'disconnected' }}">
-    </div>
-
-    {{-- Overlay loading utama yang menutupi seluruh halaman hingga semua komponen terload --}}
-    <div id="main-loading-overlay" class="main-loading-overlay">
-        <div class="loading-content">
-            <div class="spinner-large"></div>
-            <p class="loading-text">Loading Graph Analysis...</p>
-            <p class="loading-subtext">Please wait while all components are being initialized</p>
-        </div>
-    </div>
-
-    {{-- Overlay loading untuk aksi berat seperti loadChartData --}}
-    <div class="loading-overlay" wire:loading.flex wire:target="loadChartData, loadMoreSeconds">
-        <div class="loading-content-historical">
-            <div class="spinner"></div>
-            <p class="loading-text-historical">Loading Historical Data...</p>
-        </div>
-    </div>
-
-    {{-- Bagian Filter --}}
-    <div class="filters">
-        <div class="filter-group" wire:ignore> {{-- ✅ Bungkus dengan wire:ignore --}}
-            <label for="metrics-select2">Select Metrics:</label>
-            <select class="js-example-basic-multiple" {{-- Gunakan kelas dari contoh Select2 --}} id="metrics-select2" {{-- Beri ID unik --}}
-                name="tags[]" {{-- Atribut name standar --}} multiple="multiple">
-                {{-- <option value="" disabled selected>Pilih metrics...</option> --}}
-                @foreach ($allTags as $tag)
-                    <option value="{{ $tag }}">{{ ucfirst($tag) }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div class="filter-group">
-            <label>Select Interval:</label>
-            <div class="interval-buttons" id="interval-buttons">
-                <button class="{{ $interval === 'hour' ? 'active' : '' }}" data-interval="hour">
-                    Hour
-                </button>
-                <button class="{{ $interval === 'day' ? 'active' : '' }}" data-interval="day">
-                    Day
-                </button>
-                <button class="{{ $interval === 'minute' ? 'active' : '' }}" data-interval="minute">
-                    Minute
-                </button>
-                <button class="{{ $interval === 'second' ? 'active' : '' }}" data-interval="second">
-                    Second
-                </button>
+<div>
+    {{-- Sertakan file JavaScript Web Worker DAN file komponen Alpine --}}
+    @push('scripts')
+        <script src="{{ asset('js/sse-worker.js') }}" defer></script>
+        <script src="{{ asset('js/analysis-chart-component.js') }}" defer></script>
+    @endpush
+
+    {{-- Panggil komponen Alpine dengan cara yang sangat bersih --}}
+    <div wire:init="loadHistoricalData('{{ $startDate }}', '{{ $endDate }}')" x-data="analysisChartComponent"
+        x-init="initComponent()" x-on:beforeunload="cleanup()" id="analysisChartContainer">
+        <!-- Loading State -->
+        <div wire:loading wire:target="loadHistoricalData"
+            class="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                <p class="text-lg font-semibold text-gray-700">Loading historical data, please wait...</p>
             </div>
         </div>
-        <div class="filter-group">
-            <label for="start-date-livewire">Start Date:</label>
-            <input type="date" id="start-date-livewire" wire:model.defer="startDate">
-        </div>
-        <div class="filter-group">
-            <label for="end-date-livewire">End Date:</label>
-            <input type="date" id="end-date-livewire" wire:model.defer="endDate">
-        </div>
-        <div class="filter-group">
-            {{-- KUNCI PERBAIKAN 3: Arahkan wire:click ke metode baru --}}
-            <button
-                onclick="
-                // 1. Ambil nilai interval yang aktif dari atribut data-interval
-                const activeButton = document.querySelector('#interval-buttons button.active');
-                if (!activeButton) {
-                    alert('Please select an interval first');
-                    return;
-                }
-                const selectedInterval = activeButton.dataset.interval;
 
-                // 2. Ambil nilai metrik yang dipilih dari Select2
-                const selectedTags = $('#metrics-select2').val();
-                if (!selectedTags || selectedTags.length === 0) {
-                    alert('Please select at least one metric');
-                    return;
-                }
+        <!-- Main Container -->
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <!-- Header Section -->
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">SCADA Data Analysis</h2>
+                    <p class="text-gray-600 mt-1">Real-time monitoring and historical data visualization</p>
+                </div>
 
-                // 3. Validasi tanggal
-                const startDate = document.getElementById('start-date-livewire').value;
-                const endDate = document.getElementById('end-date-livewire').value;
-                if (!startDate || !endDate) {
-                    alert('Please select both start and end dates');
-                    return;
-                }
+                <!-- Connection Status -->
+                <div class="flex items-center space-x-4 mt-4 lg:mt-0">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-3 h-3 rounded-full bg-gray-400" id="connectionIndicator"></div>
+                        <span id="connectionStatus" class="text-sm font-medium">Connecting...</span>
+                    </div>
 
-                // Validasi bahwa end date tidak lebih awal dari start date
-                if (new Date(endDate) < new Date(startDate)) {
-                    alert('End date cannot be earlier than start date');
-                    return;
-                }
+                    <div class="text-sm text-gray-500">
+                        Last update: <span id="lastUpdateTime">-</span>
+                    </div>
+                </div>
+            </div>
 
-                // 4. Set loading state pada tombol
-                const loadButton = event.target;
-                const originalText = loadButton.textContent;
-                loadButton.textContent = 'Loading...';
-                loadButton.disabled = true;
-                loadButton.style.opacity = '0.7';
+            <!-- Control Panel -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                <!-- Chart Type Selector -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Chart Type</label>
+                    <select name="chartType"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="line">Line Chart</option>
+                        <option value="scatter">Scatter Plot</option>
+                        <option value="bar">Bar Chart</option>
+                    </select>
+                </div>
 
-                // 5. Set semua properti di Livewire terlebih dahulu
-                @this.set('interval', selectedInterval);
-                @this.set('selectedTags', selectedTags);
+                <!-- Aggregation Interval -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Aggregation</label>
+                    <select name="aggregationInterval"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="1">1 Second</option>
+                        <option value="5" selected>5 Seconds</option>
+                        <option value="10">10 Seconds</option>
+                        <option value="30">30 Seconds</option>
+                        <option value="60">1 Minute</option>
+                        <option value="300">5 Minutes</option>
+                        <option value="900">15 Minutes</option>
+                        <option value="1800">30 Minutes</option>
+                        <option value="3600">1 Hour</option>
+                    </select>
+                </div>
 
-                // TAMBAHKAN BARIS INI
-                if (typeof window.lastSuccessfulPollTimestamp !== 'undefined') {
-                    window.lastSuccessfulPollTimestamp = Date.now();
-                }
+                <!-- Time Range Picker -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                    <input type="datetime-local" name="startDate" value="{{ $startDate }}"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
 
-                // 6. Setelah semua state di-set, panggil method utama untuk memuat chart
-                @this.call('setHistoricalModeAndLoad').then((result) => {
-                    console.log('setHistoricalModeAndLoad completed:', result);
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+                    <input type="datetime-local" name="endDate" value="{{ $endDate }}"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
 
-                    // Reset tombol setelah selesai
-                    loadButton.textContent = originalText;
-                    loadButton.disabled = false;
-                    loadButton.style.opacity = '1';
+            <!-- Action Buttons -->
+            <div class="flex flex-wrap items-center space-x-4 mb-6">
+                <button id="playPauseBtn"
+                    class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-md flex items-center space-x-2 transition-colors">
+                    <i class="fas fa-play"></i>
+                    <span>Play</span>
+                </button>
 
-                    // Tambahkan log untuk debugging
-                    console.log('Historical data load completed successfully');
+                <button id="exportBtn"
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md flex items-center space-x-2 transition-colors">
+                    <i class="fas fa-download"></i>
+                    <span>Export CSV</span>
+                </button>
 
-                    // ✅ PERBAIKAN: Sembunyikan overlay loading setelah data historis selesai
-                    // Gunakan arrow function untuk mempertahankan konteks this
-                    const alpineElement = document.querySelector('[x-data]');
-
-                    // Periksa apakah elemennya ada DAN properti internal Alpine ada
-                    if (alpineElement && alpineElement.__x) {
-                        const alpineComponent = alpineElement.__x.$data;
-
-                        // Periksa apakah metodenya ada sebelum memanggil
-                        if (alpineComponent && typeof alpineComponent.hideHistoricalDataOverlay === 'function') {
-                            alpineComponent.hideHistoricalDataOverlay();
-                        } else {
-                            console.warn('Metode hideHistoricalDataOverlay() tidak ditemukan pada komponen Alpine.');
-                        }
-                    } else {
-                        console.warn('Komponen Alpine [x-data] tidak ditemukan di DOM. Mungkin karena race condition setelah error.');
-                    }
-
-                }).catch((error) => {
-                    console.error('setHistoricalModeAndLoad failed:', error);
-
-                    // Reset tombol jika terjadi error
-                    loadButton.textContent = originalText;
-                    loadButton.disabled = false;
-                    loadButton.style.opacity = '1';
-
-                    // Tambahkan efek error pada tombol
-                    loadButton.style.animation = 'shake 0.5s ease-in-out';
-                    setTimeout(() => {
-                        loadButton.style.animation = '';
-                    }, 500);
-
-                    // ✅ PERBAIKAN: Sembunyikan overlay loading meskipun ada error
-                    // Gunakan arrow function untuk mempertahankan konteks this
-                    const alpineElement = document.querySelector('[x-data]');
-
-                    // Periksa apakah elemennya ada DAN properti internal Alpine ada
-                    if (alpineElement && alpineElement.__x) {
-                        const alpineComponent = alpineElement.__x.$data;
-
-                        // Periksa apakah metodenya ada sebelum memanggil
-                        if (alpineComponent && typeof alpineComponent.hideHistoricalDataOverlay === 'function') {
-                            alpineComponent.hideHistoricalDataOverlay();
-                        } else {
-                            console.warn('Metode hideHistoricalDataOverlay() tidak ditemukan pada komponen Alpine.');
-                        }
-                    } else {
-                        console.warn('Komponen Alpine [x-data] tidak ditemukan di DOM. Mungkin karena race condition setelah error.');
-                    }
-                });
-            "
-                class="btn-primary">Load Historical Data</button>
-        </div>
-
-        {{-- KUNCI PERBAIKAN: Tambahkan blok toggle switch di sini --}}
-        <div class="filter-group">
-            <label for="realtime-toggle">Real-time Updates</label>
-            <label class="toggle-switch">
-                <input type="checkbox" id="realtime-toggle" wire:model.live="realtimeEnabled">
-                <span class="slider"></span>
-            </label>
-        </div>
-    </div>
-
-    {{-- Kontainer untuk pesan peringatan --}}
-    <div id="chart-warning"
-        style="display: none; padding: 12px; margin-bottom: 16px; border-radius: 0.375rem; background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404;">
-        <strong id="warning-message"></strong>
-    </div>
-
-    {{-- Kontainer untuk Grafik Plotly --}}
-    <div class="single-chart-container" wire:ignore>
-        <div id="plotlyChart" style="width: 100%; height: 100%;"></div>
-        {{-- Tombol "Load More" yang hanya muncul untuk interval 'second' --}}
-        @if ($interval === 'second')
-            <div id="load-more-container">
-                <button wire:click="loadMoreSeconds" wire:loading.attr="disabled" class="btn-secondary">
-                    <div wire:loading wire:target="loadMoreSeconds" class="spinner"
-                        style="width: 16px; height: 16px; border-width: 2px; margin-right: 8px;"></div>
-                    <span wire:loading.remove wire:target="loadMoreSeconds">Load 30 Minutes Earlier</span>
-                    <span wire:loading wire:target="loadMoreSeconds">Loading...</span>
+                <button onclick="location.reload()"
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md flex items-center space-x-2 transition-colors">
+                    <i class="fas fa-redo"></i>
+                    <span>Refresh</span>
                 </button>
             </div>
-        @endif
+
+            <!-- Channel Selection -->
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-3">Channel Selection</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" name="channelSelect" value="ch1" checked
+                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm font-medium text-gray-700">CH1</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" name="channelSelect" value="ch2" checked
+                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm font-medium text-gray-700">CH2</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" name="channelSelect" value="ch3" checked
+                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm font-medium text-gray-700">CH3</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" name="channelSelect" value="ch4"
+                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm font-medium text-gray-700">CH4</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" name="channelSelect" value="ch5"
+                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm font-medium text-gray-700">CH5</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" name="channelSelect" value="ch6"
+                            class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm font-medium text-gray-700">CH6</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Chart Container -->
+            <div class="bg-gray-50 rounded-lg p-4">
+                <div id="analysisChart" style="width:100%; height:500px;"></div>
+            </div>
+
+            <!-- Data Statistics -->
+            <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-blue-50 rounded-lg p-4">
+                    <h4 class="text-sm font-medium text-blue-800">Total Data Points</h4>
+                    <p class="text-2xl font-bold text-blue-900" id="totalDataPoints">0</p>
+                </div>
+
+                <div class="bg-green-50 rounded-lg p-4">
+                    <h4 class="text-sm font-medium text-green-800">Active Channels</h4>
+                    <p class="text-2xl font-bold text-green-900" id="activeChannels">0</p>
+                </div>
+
+                <div class="bg-purple-50 rounded-lg p-4">
+                    <h4 class="text-sm font-medium text-purple-800">Update Rate</h4>
+                    <p class="text-2xl font-bold text-purple-900" id="updateRate">0/s</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom CSS -->
+        <style>
+            /* Chart container styling */
+            #analysisChart {
+                border-radius: 8px;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+
+            /* Custom scrollbar */
+            ::-webkit-scrollbar {
+                width: 8px;
+                height: 8px;
+            }
+
+            ::-webkit-scrollbar-track {
+                background: #f1f5f9;
+                border-radius: 4px;
+            }
+
+            ::-webkit-scrollbar-thumb {
+                background: #cbd5e1;
+                border-radius: 4px;
+            }
+
+            ::-webkit-scrollbar-thumb:hover {
+                background: #94a3b8;
+            }
+
+            /* Animation classes */
+            .animate-pulse {
+                animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            }
+
+            @keyframes pulse {
+
+                0%,
+                100% {
+                    opacity: 1;
+                }
+
+                50% {
+                    opacity: .5;
+                }
+            }
+
+            /* Responsive adjustments */
+            @media (max-width: 768px) {
+                .grid-cols-1.md\:grid-cols-3 {
+                    grid-template-columns: repeat(1, minmax(0, 1fr));
+                }
+
+                #analysisChart {
+                    height: 400px !important;
+                }
+            }
+
+            /* Chart tooltip customization */
+            .js-plotly-plot .plotly .main-svg {
+                border-radius: 8px;
+            }
+
+            /* Loading animation */
+            .loading-spinner {
+                border: 3px solid #f3f3f3;
+                border-top: 3px solid #3498db;
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                animation: spin 1s linear infinite;
+            }
+
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+        </style>
     </div>
-
-    <style>
-        /* Overlay loading utama yang menutupi seluruh halaman */
-        .main-loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(5px);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 9999;
-            transition: opacity 0.3s ease-out;
-        }
-
-        .main-loading-overlay.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        .loading-content {
-            text-align: center;
-            padding: 2rem;
-            border-radius: 12px;
-            background: white;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            border: 1px solid #e5e7eb;
-        }
-
-        .spinner-large {
-            width: 60px;
-            height: 60px;
-            border: 4px solid #f3f4f6;
-            border-top: 4px solid #3b82f6;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 1rem;
-        }
-
-        .loading-text {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: #1f2937;
-            margin: 0 0 0.5rem 0;
-        }
-
-        .loading-subtext {
-            font-size: 0.875rem;
-            color: #6b7280;
-            margin: 0;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Pastikan overlay loading tidak bisa di-scroll */
-        body.loading {
-            overflow: hidden;
-            position: fixed;
-            width: 100%;
-        }
-
-        /* Responsive design untuk overlay loading */
-        @media (max-width: 768px) {
-            .loading-content {
-                padding: 1.5rem;
-                margin: 1rem;
-            }
-
-            .spinner-large {
-                width: 50px;
-                height: 50px;
-            }
-
-            .loading-text {
-                font-size: 1.1rem;
-            }
-
-            .loading-subtext {
-                font-size: 0.8rem;
-            }
-        }
-
-        /* Pastikan overlay loading selalu di atas semua elemen */
-        .main-loading-overlay {
-            z-index: 99999 !important;
-        }
-
-        /* Animasi fade in untuk overlay */
-        .main-loading-overlay {
-            animation: fadeIn 0.3s ease-in;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-            }
-
-            to {
-                opacity: 1;
-            }
-        }
-
-        /* ✅ PERBAIKAN: CSS untuk overlay loading historical data */
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(3px);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 9998;
-            transition: opacity 0.3s ease-out;
-        }
-
-        .loading-overlay[wire\\:loading] {
-            display: flex;
-        }
-
-        .loading-content-historical {
-            text-align: center;
-            padding: 1.5rem;
-            border-radius: 8px;
-            background: white;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            border: 1px solid #e5e7eb;
-        }
-
-        .loading-text-historical {
-            font-size: 1rem;
-            font-weight: 500;
-            color: #374151;
-            margin: 0.75rem 0 0 0;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid #f3f4f6;
-            border-top: 3px solid #3b82f6;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-        }
-    </style>
-
-    @script
-        <script>
-            // TAMBAHKAN DUA BARIS INI - BUAT GLOBAL
-            window.lastSuccessfulPollTimestamp = Date.now();
-            window.connectionCheckInterval = null;
-
-
-
-            document.addEventListener('livewire:navigated', () => {
-                console.log('🚀 Livewire navigated event triggered');
-
-                // Optimistic Update untuk Interval Buttons (tanpa komunikasi ke server)
-                let isProcessingInterval = false;
-                const intervalButtons = document.getElementById('interval-buttons');
-                if (intervalButtons) {
-                    intervalButtons.addEventListener('click', (e) => {
-                        if (e.target.tagName === 'BUTTON' && e.target.dataset.interval) {
-                            const clickedButton = e.target;
-                            const intervalValue = clickedButton.dataset.interval;
-
-                            // Cek apakah tombol sudah aktif atau sedang diproses
-                            if (clickedButton.classList.contains('active') || isProcessingInterval) {
-                                return; // Jangan lakukan apa-apa jika sudah aktif atau sedang diproses
-                            }
-
-                            isProcessingInterval = true;
-
-                            // Optimistic update: langsung ubah tampilan (tanpa komunikasi ke server)
-                            const allButtons = intervalButtons.querySelectorAll('button');
-                            allButtons.forEach(btn => {
-                                btn.classList.remove('active');
-                            });
-                            clickedButton.classList.add('active');
-
-                            // Reset flag setelah delay untuk mencegah multiple clicks
-                            setTimeout(() => {
-                                isProcessingInterval = false;
-                            }, 300);
-                        }
-                    });
-                }
-
-                // Inisialisasi Select2 pada elemen dengan ID #metrics-select2
-                $('#metrics-select2').select2({
-                    // Ukuran static untuk kontainer select
-                    width: '300px',
-                    dropdownAutoWidth: false,
-                    dropdownParent: $('body')
-                });
-                console.log('✅ Select2 initialized successfully');
-
-                // Pasang event listener 'change' dari Select2
-                $('#metrics-select2').on('change', function(e) {
-                    // Ambil semua nilai yang dipilih
-                    var selectedValues = $(this).val();
-
-                    // Baris @this.set() sudah dihapus. Biarkan kosong.
-                    // Data akan dikirim ke server hanya saat tombol "Load Historical Data" ditekan
-
-                    // Tambahkan efek visual untuk menunjukkan bahwa metrik telah dipilih
-                    if (selectedValues && selectedValues.length > 0) {
-                        $(this).addClass('has-selection');
-                    } else {
-                        $(this).removeClass('has-selection');
-                    }
-                });
-
-                const chartContainer = document.getElementById('plotlyChart');
-                const warningBox = document.getElementById('chart-warning');
-                const warningMessage = document.getElementById('warning-message');
-
-                if (!chartContainer || !warningBox) return;
-
-                let globalState = {
-                    lastKnownTimestamp: null,
-                    isCatchingUp: false,
-                };
-
-                const updateLastKnownTimestamp = () => {
-                    const plotlyChart = document.getElementById('plotlyChart');
-                    if (plotlyChart && plotlyChart.data && plotlyChart.data.length > 0) {
-                        let maxTimestamp = 0;
-                        plotlyChart.data.forEach(trace => {
-                            if (trace.x && trace.x.length > 0) {
-                                const lastTimestampInTrace = new Date(trace.x[trace.x.length - 1])
-                                    .getTime();
-                                if (lastTimestampInTrace > maxTimestamp) {
-                                    maxTimestamp = lastTimestampInTrace;
-                                }
-                            }
-                        });
-                        if (maxTimestamp > 0) {
-                            const lastDate = new Date(maxTimestamp);
-                            globalState.lastKnownTimestamp = lastDate.toISOString().slice(0, 19).replace('T', ' ');
-                        } else {
-                            globalState.lastKnownTimestamp = null;
-                        }
-                    } else {
-                        globalState.lastKnownTimestamp = null;
-                    }
-                };
-
-                // HAPUS SEMUA KODE visibilitychange yang bermasalah
-                // Web Worker akan menangani koneksi SSE secara independen
-                // tanpa terpengaruh oleh perubahan visibilitas tab
-
-                // Event listener untuk memastikan state interval tetap konsisten setelah Livewire update
-                // (hanya diperlukan jika ada update dari server)
-                document.addEventListener('livewire:update', () => {
-                    console.log('🔄 Livewire update event received');
-                    isProcessingInterval = false;
-                });
-
-                // Event listener untuk memastikan overlay loading berfungsi dengan baik
-                document.addEventListener('livewire:load', () => {
-                    console.log('📊 Livewire load event received');
-                });
-
-                // Event listener untuk memastikan semua komponen siap
-                document.addEventListener('DOMContentLoaded', () => {
-                    console.log('🌐 DOM content loaded');
-                });
-
-                // ✅ PERBAIKAN: Event listener untuk loadMoreSeconds
-                document.addEventListener('livewire:loading', (event) => {
-                    if (event.detail && event.detail.target && event.detail.target.includes(
-                            'loadMoreSeconds')) {
-                        console.log('🔄 LoadMoreSeconds loading started');
-                    }
-                });
-
-                document.addEventListener('livewire:loaded', (event) => {
-                    if (event.detail && event.detail.target && event.detail.target.includes(
-                            'loadMoreSeconds')) {
-                        console.log('✅ LoadMoreSeconds loading completed');
-                        // Sembunyikan overlay loading untuk loadMoreSeconds
-                        // Gunakan arrow function untuk mempertahankan konteks this
-                        const alpineElement = document.querySelector('[x-data]');
-
-                        // Periksa apakah elemennya ada DAN properti internal Alpine ada
-                        if (alpineElement && alpineElement.__x) {
-                            const alpineComponent = alpineElement.__x.$data;
-
-                            // Periksa apakah metodenya ada sebelum memanggil
-                            if (alpineComponent && typeof alpineComponent.hideHistoricalDataOverlay ===
-                                'function') {
-                                alpineComponent.hideHistoricalDataOverlay();
-                            } else {
-                                console.warn(
-                                    'Metode hideHistoricalDataOverlay() tidak ditemukan pada komponen Alpine.'
-                                );
-                            }
-                        } else {
-                            console.warn(
-                                'Komponen Alpine [x-data] tidak ditemukan di DOM. Mungkin karena race condition setelah error.'
-                            );
-                        }
-                    }
-                });
-
-                // Event listener untuk menangani error state
-                document.addEventListener('livewire:error', () => {
-                    isProcessingInterval = false;
-                    // Tambahkan efek visual untuk error feedback
-                    const intervalButtons = document.getElementById('interval-buttons');
-                    if (intervalButtons) {
-                        intervalButtons.style.animation = 'shake 0.5s ease-in-out';
-                        setTimeout(() => {
-                            intervalButtons.style.animation = '';
-                        }, 500);
-                    }
-                });
-
-                // Tambahkan feedback visual untuk input tanggal
-                const startDateInput = document.getElementById('start-date-livewire');
-                const endDateInput = document.getElementById('end-date-livewire');
-
-                if (startDateInput) {
-                    startDateInput.addEventListener('change', function() {
-                        this.style.borderColor = 'var(--primary-color)';
-                    });
-                }
-
-                if (endDateInput) {
-                    endDateInput.addEventListener('change', function() {
-                        this.style.borderColor = 'var(--primary-color)';
-                    });
-                }
-            });
-        </script>
-    @endscript
 </div>
