@@ -1,0 +1,31 @@
+{
+  "appId": "12345",
+  "appKey": "scada_dashboard_key_2024",
+  "appSecret": "scada_dashboard_secret_2024",
+  "port": 6001,
+  "host": "0.0.0.0",
+  "database": {
+    "redis": {
+      "host": "127.0.0.1",
+      "port": 6379,
+      "password": null,
+      "db": 0
+    }
+  },
+  "cors": {
+    "origin": ["http://localhost:8000", "http://127.0.0.1:8000"],
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allowedHeaders": ["Content-Type", "X-Requested-With", "Authorization", "X-CSRF-TOKEN"]
+  },
+  "ssl": {
+    "enabled": false,
+    "cert": "",
+    "key": ""
+  },
+  "debug": true,
+  "maxPayloadSizeInMb": 100,
+  "metrics": {
+    "enabled": true,
+    "driver": "memory"
+  }
+}

@@ -1,212 +1,314 @@
 /**
- * SCADA WebSocket Client untuk menangani koneksi real-time
- * Implementasi yang robust dengan auto-reconnect, heartbeat, dan error handling
+ * SCADA WebSocket Client untuk komunikasi real-time dengan Soketi
  */
 class ScadaWebSocketClient {
-    constructor(options = {}) {
-        this.options = {
-            url: options.url || "ws://localhost:6001/app/scada-app",
-            reconnectAttempts: options.reconnectAttempts || 10,
-            reconnectDelay: options.reconnectDelay || 1000,
-            maxReconnectDelay: options.maxReconnectDelay || 30000,
-            heartbeatInterval: options.heartbeatInterval || 30000,
-            ...options,
+    constructor(config = {}) {
+        this.config = {
+            serverUrl: config.serverUrl || "ws://127.0.0.1:6001",
+            appKey: config.appKey || "your_app_key_here",
+            appId: config.appId || "12345",
+            cluster: config.cluster || "mt1",
+            encrypted: config.encrypted || false,
+            channel: config.channel || "scada-data",
+            onConnect: config.onConnect || (() => {}),
+            onMessage: config.onMessage || (() => {}),
+            onError: config.onError || (() => {}),
+            onDisconnect: config.onDisconnect || (() => {}),
+            autoReconnect: config.autoReconnect !== false,
+            reconnectInterval: config.reconnectInterval || 5000,
+            maxReconnectAttempts: config.maxReconnectAttempts || 10,
         };
 
-        this.ws = null;
+        this.connection = null;
+        this.channels = new Map();
         this.reconnectAttempts = 0;
-        this.reconnectTimer = null;
-        this.heartbeatTimer = null;
         this.isConnecting = false;
-        this.isConnected = false;
+        this.subscribedChannels = new Set();
 
-        // Event handlers
-        this.onMessage = null;
-        this.onConnect = null;
-        this.onDisconnect = null;
-        this.onError = null;
-
-        // Connection state
-        this.connectionState = "disconnected";
-        this.lastMessageTime = 0;
-
-        // Start connection
-        this.connect();
+        // Initialize Pusher
+        this.initializePusher();
     }
 
-    connect() {
-        if (this.isConnecting || this.isConnected) return;
-
-        this.isConnecting = true;
-        this.connectionState = "connecting";
-
-        console.log(`Connecting to WebSocket: ${this.options.url}`);
-
-        try {
-            this.ws = new WebSocket(this.options.url);
-            this.setupEventHandlers();
-        } catch (error) {
-            console.error("Failed to create WebSocket connection:", error);
-            this.handleConnectionError(error);
-        }
-    }
-
-    setupEventHandlers() {
-        this.ws.onopen = () => {
-            console.log("WebSocket connection established");
-            this.isConnecting = false;
-            this.isConnected = true;
-            this.connectionState = "connected";
-            this.reconnectAttempts = 0;
-
-            // Start heartbeat
-            this.startHeartbeat();
-
-            if (this.onConnect) {
-                this.onConnect();
-            }
-        };
-
-        this.ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                this.lastMessageTime = Date.now();
-
-                if (this.onMessage) {
-                    this.onMessage(data);
-                }
-            } catch (error) {
-                console.error("Error parsing WebSocket message:", error);
-            }
-        };
-
-        this.ws.onclose = (event) => {
-            console.log(
-                "WebSocket connection closed:",
-                event.code,
-                event.reason
+    /**
+     * Initialize Pusher client
+     */
+    initializePusher() {
+        if (typeof Pusher === "undefined") {
+            console.error(
+                "Pusher library not loaded. Please include pusher-js in your HTML."
             );
-            this.handleDisconnect(event);
-        };
-
-        this.ws.onerror = (error) => {
-            console.error("WebSocket error:", error);
-            this.handleConnectionError(error);
-        };
-    }
-
-    startHeartbeat() {
-        this.heartbeatTimer = setInterval(() => {
-            if (this.isConnected && this.ws.readyState === WebSocket.OPEN) {
-                this.ws.send(
-                    JSON.stringify({
-                        type: "heartbeat",
-                        timestamp: Date.now(),
-                    })
-                );
-            }
-        }, this.options.heartbeatInterval);
-    }
-
-    handleDisconnect(event) {
-        this.isConnected = false;
-        this.connectionState = "disconnected";
-
-        if (this.heartbeatTimer) {
-            clearInterval(this.heartbeatTimer);
-            this.heartbeatTimer = null;
-        }
-
-        if (this.onDisconnect) {
-            this.onDisconnect(event);
-        }
-
-        // Attempt reconnection
-        this.scheduleReconnect();
-    }
-
-    handleConnectionError(error) {
-        this.isConnecting = false;
-        this.connectionState = "error";
-
-        if (this.onError) {
-            this.onError(error);
-        }
-
-        // Attempt reconnection
-        this.scheduleReconnect();
-    }
-
-    scheduleReconnect() {
-        if (this.reconnectAttempts >= this.options.reconnectAttempts) {
-            console.error("Max reconnection attempts reached");
-            this.connectionState = "failed";
             return;
         }
 
-        const delay = Math.min(
-            this.options.reconnectDelay * Math.pow(2, this.reconnectAttempts),
-            this.options.maxReconnectDelay
-        );
+        this.pusher = new Pusher(this.config.appKey, {
+            cluster: this.config.cluster,
+            encrypted: this.config.encrypted,
+            wsHost: this.config.serverUrl.replace(/^ws:\/\//, "").split(":")[0],
+            wsPort: parseInt(this.config.serverUrl.split(":")[2]) || 6001,
+            forceTLS: false,
+            enabledTransports: ["ws", "wss"],
+            disableStats: true,
+            authEndpoint: "/broadcasting/auth",
+        });
 
-        console.log(
-            `Scheduling reconnection attempt ${
-                this.reconnectAttempts + 1
-            } in ${delay}ms`
-        );
+        // Bind events
+        this.pusher.connection.bind("connected", () => {
+            console.log("Connected to WebSocket server");
+            this.reconnectAttempts = 0;
+            this.config.onConnect();
+        });
 
-        this.reconnectTimer = setTimeout(() => {
-            this.reconnectAttempts++;
-            this.connect();
-        }, delay);
-    }
+        this.pusher.connection.bind("disconnected", () => {
+            console.log("Disconnected from WebSocket server");
+            this.config.onDisconnect();
 
-    send(data) {
-        if (this.isConnected && this.ws.readyState === WebSocket.OPEN) {
-            try {
-                this.ws.send(JSON.stringify(data));
-                return true;
-            } catch (error) {
-                console.error("Failed to send data:", error);
-                return false;
+            if (
+                this.config.autoReconnect &&
+                this.reconnectAttempts < this.config.maxReconnectAttempts
+            ) {
+                this.scheduleReconnect();
             }
-        } else {
-            console.warn("WebSocket not connected, cannot send data");
-            return false;
-        }
+        });
+
+        this.pusher.connection.bind("error", (error) => {
+            console.error("WebSocket connection error:", error);
+            this.config.onError(error);
+        });
     }
 
-    disconnect() {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
-        }
+    /**
+     * Connect to WebSocket server
+     */
+    connect() {
+        if (this.isConnecting) return;
 
-        if (this.heartbeatTimer) {
-            clearInterval(this.heartbeatTimer);
-            this.heartbeatTimer = null;
-        }
+        this.isConnecting = true;
+        console.log("Connecting to WebSocket server...");
 
-        if (this.ws) {
-            this.ws.close(1000, "Client disconnect");
-            this.ws = null;
-        }
-
+        // Pusher automatically connects when initialized
         this.isConnecting = false;
-        this.isConnected = false;
-        this.connectionState = "disconnected";
     }
 
-    // Getters
-    getConnectionState() {
-        return this.connectionState;
+    /**
+     * Disconnect from WebSocket server
+     */
+    disconnect() {
+        if (this.pusher) {
+            this.pusher.disconnect();
+        }
     }
 
-    isConnectionHealthy() {
-        return (
-            this.isConnected &&
-            Date.now() - this.lastMessageTime <
-                this.options.heartbeatInterval * 2
+    /**
+     * Subscribe to a channel
+     */
+    subscribe(channelName) {
+        if (this.subscribedChannels.has(channelName)) {
+            console.log(`Already subscribed to channel: ${channelName}`);
+            return;
+        }
+
+        try {
+            const channel = this.pusher.subscribe(channelName);
+            this.channels.set(channelName, channel);
+            this.subscribedChannels.add(channelName);
+
+            // Listen for events
+            channel.bind("scada.data.received", (data) => {
+                this.config.onMessage(data);
+            });
+
+            channel.bind("scada.batch.received", (data) => {
+                this.config.onMessage(data);
+            });
+
+            channel.bind("scada.aggregated.received", (data) => {
+                this.config.onMessage(data);
+            });
+
+            console.log(`Subscribed to channel: ${channelName}`);
+        } catch (error) {
+            console.error(
+                `Error subscribing to channel ${channelName}:`,
+                error
+            );
+        }
+    }
+
+    /**
+     * Unsubscribe from a channel
+     */
+    unsubscribe(channelName) {
+        if (this.pusher && this.subscribedChannels.has(channelName)) {
+            this.pusher.unsubscribe(channelName);
+            this.channels.delete(channelName);
+            this.subscribedChannels.delete(channelName);
+            console.log(`Unsubscribed from channel: ${channelName}`);
+        }
+    }
+
+    /**
+     * Send message to server (if bidirectional communication is needed)
+     */
+    send(message) {
+        // Note: Pusher doesn't support direct client-to-server messaging
+        // This would require additional server-side implementation
+        console.warn(
+            "Direct messaging not supported with Pusher. Use HTTP API instead."
         );
     }
+
+    /**
+     * Get connection status
+     */
+    getConnectionState() {
+        return this.pusher ? this.pusher.connection.state : "disconnected";
+    }
+
+    /**
+     * Check if connected
+     */
+    isConnected() {
+        return this.pusher && this.pusher.connection.state === "connected";
+    }
+
+    /**
+     * Get subscribed channels
+     */
+    getSubscribedChannels() {
+        return Array.from(this.subscribedChannels);
+    }
+
+    /**
+     * Schedule reconnection
+     */
+    scheduleReconnect() {
+        this.reconnectAttempts++;
+        console.log(
+            `Scheduling reconnection attempt ${this.reconnectAttempts} in ${this.config.reconnectInterval}ms`
+        );
+
+        setTimeout(() => {
+            if (!this.isConnected()) {
+                this.connect();
+            }
+        }, this.config.reconnectInterval);
+    }
+
+    /**
+     * Update configuration
+     */
+    updateConfig(newConfig) {
+        this.config = { ...this.config, ...newConfig };
+
+        // Reinitialize if server URL changed
+        if (
+            newConfig.serverUrl &&
+            newConfig.serverUrl !== this.config.serverUrl
+        ) {
+            this.disconnect();
+            this.initializePusher();
+        }
+    }
+}
+
+/**
+ * Laravel Echo integration (alternative approach)
+ */
+class ScadaEchoClient {
+    constructor(config = {}) {
+        this.config = {
+            serverUrl: config.serverUrl || "http://127.0.0.1:6001",
+            appKey: config.appKey || "your_app_key_here",
+            appId: config.appId || "12345",
+            cluster: config.cluster || "mt1",
+            encrypted: config.encrypted || false,
+            onConnect: config.onConnect || (() => {}),
+            onMessage: config.onMessage || (() => {}),
+            onError: config.onError || (() => {}),
+            onDisconnect: config.onDisconnect || (() => {}),
+        };
+
+        this.initializeEcho();
+    }
+
+    /**
+     * Initialize Laravel Echo
+     */
+    initializeEcho() {
+        if (typeof Echo === "undefined") {
+            console.error(
+                "Laravel Echo not loaded. Please include laravel-echo in your HTML."
+            );
+            return;
+        }
+
+        window.Echo = new Echo({
+            broadcaster: "pusher",
+            key: this.config.appKey,
+            cluster: this.config.cluster,
+            encrypted: this.config.encrypted,
+            wsHost: this.config.serverUrl
+                .replace(/^https?:\/\//, "")
+                .split(":")[0],
+            wsPort: parseInt(this.config.serverUrl.split(":")[2]) || 6001,
+            forceTLS: false,
+            enabledTransports: ["ws", "wss"],
+            disableStats: true,
+            authEndpoint: "/broadcasting/auth",
+        });
+
+        // Bind connection events
+        window.Echo.connector.pusher.connection.bind("connected", () => {
+            console.log("Connected via Laravel Echo");
+            this.config.onConnect();
+        });
+
+        window.Echo.connector.pusher.connection.bind("disconnected", () => {
+            console.log("Disconnected via Laravel Echo");
+            this.config.onDisconnect();
+        });
+
+        window.Echo.connector.pusher.connection.bind("error", (error) => {
+            console.error("Echo connection error:", error);
+            this.config.onError(error);
+        });
+    }
+
+    /**
+     * Listen to channel
+     */
+    listen(channelName, eventName, callback) {
+        if (!window.Echo) {
+            console.error("Laravel Echo not initialized");
+            return;
+        }
+
+        window.Echo.channel(channelName).listen(eventName, callback);
+    }
+
+    /**
+     * Listen to private channel
+     */
+    listenPrivate(channelName, eventName, callback) {
+        if (!window.Echo) {
+            console.error("Laravel Echo not initialized");
+            return;
+        }
+
+        window.Echo.private(channelName).listen(eventName, callback);
+    }
+
+    /**
+     * Leave channel
+     */
+    leave(channelName) {
+        if (window.Echo) {
+            window.Echo.leaveChannel(channelName);
+        }
+    }
+}
+
+// Export for use in other modules
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = { ScadaWebSocketClient, ScadaEchoClient };
 }
