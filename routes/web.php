@@ -46,6 +46,41 @@ Route::get('/websocket-test', function () {
     return view('websocket-test');
 })->name('websocket-test');
 
+// Redis test route
+Route::get('/redis-test', function () {
+    try {
+        // Test Redis connection
+        $redis = Redis::connection();
+        $ping = $redis->ping();
+
+        // Test basic operations
+        $redis->set('test_key', 'Hello Redis from Laravel!');
+        $value = $redis->get('test_key');
+
+        // Test info
+        $info = $redis->info();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Redis connection successful',
+            'ping' => $ping,
+            'test_value' => $value,
+            'redis_version' => $info['redis_version'] ?? 'unknown',
+            'os' => $info['os'] ?? 'unknown',
+            'process_id' => $info['process_id'] ?? 'unknown'
+        ]);
+    } catch (Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Redis connection failed',
+            'error' => $e->getMessage(),
+            'error_type' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine()
+        ], 500);
+    }
+})->name('redis-test');
+
 Route::get('/broadcast-test', function () {
     // Test broadcasting
     broadcast(new \App\Events\ScadaDataReceived([

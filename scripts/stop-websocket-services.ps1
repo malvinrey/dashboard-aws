@@ -1,4 +1,4 @@
-Write-Host "🛑 Stopping SCADA WebSocket Services..." -ForegroundColor Red
+Write-Host "Stopping SCADA WebSocket Services..." -ForegroundColor Red
 
 # Function to stop service by name pattern
 function Stop-ServiceByPattern {
@@ -12,12 +12,12 @@ function Stop-ServiceByPattern {
         if ($processes) {
             Write-Host "Stopping $Description..." -ForegroundColor Yellow
             $processes | Stop-Process -Force
-            Write-Host "✅ $Description stopped" -ForegroundColor Green
+            Write-Host "$Description stopped" -ForegroundColor Green
         } else {
-            Write-Host "ℹ️  $Description not running" -ForegroundColor Gray
+            Write-Host "$Description not running" -ForegroundColor Gray
         }
     } catch {
-        Write-Host "⚠️  Error stopping $Description: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Error stopping $Description - $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -33,12 +33,12 @@ function Stop-NodeService {
         if ($processes) {
             Write-Host "Stopping $Description..." -ForegroundColor Yellow
             $processes | Stop-Process -Force
-            Write-Host "✅ $Description stopped" -ForegroundColor Green
+            Write-Host "$Description stopped" -ForegroundColor Green
         } else {
-            Write-Host "ℹ️  $Description not running" -ForegroundColor Gray
+            Write-Host "$Description not running" -ForegroundColor Gray
         }
     } catch {
-        Write-Host "⚠️  Error stopping $Description: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Error stopping $Description - $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -59,10 +59,10 @@ try {
     if ($phpProcesses) {
         Write-Host "Stopping remaining PHP processes..." -ForegroundColor Yellow
         $phpProcesses | Stop-Process -Force
-        Write-Host "✅ Remaining PHP processes stopped" -ForegroundColor Green
+        Write-Host "Remaining PHP processes stopped" -ForegroundColor Green
     }
 } catch {
-    Write-Host "⚠️  Error stopping remaining PHP processes: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Error stopping remaining PHP processes - $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 # Check if ports are still in use
@@ -75,14 +75,14 @@ foreach ($port in $ports) {
         $connection = New-Object System.Net.Sockets.TcpClient
         $connection.Connect("127.0.0.1", $port)
         $connection.Close()
-        Write-Host "⚠️  Port $port is still in use" -ForegroundColor Yellow
+        Write-Host "Port $port is still in use" -ForegroundColor Yellow
     } catch {
-        Write-Host "✅ Port $port is available" -ForegroundColor Green
+        Write-Host "Port $port is available" -ForegroundColor Green
     }
 }
 
 Write-Host ""
-Write-Host "🎉 All WebSocket services stopped successfully!" -ForegroundColor Green
+Write-Host "All WebSocket services stopped successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "To restart services, run:" -ForegroundColor Cyan
 Write-Host "  .\scripts\start-websocket-services.ps1" -ForegroundColor White
