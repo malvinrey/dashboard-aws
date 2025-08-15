@@ -54,7 +54,9 @@ function generateScadaData($iteration)
     $timestamp = date('Y-m-d H:i:s', $baseTime + $iteration);
 
     return [
-        'timestamp' => $timestamp,
+        'batch_id' => uniqid(),
+        'nama_group' => 'test_group_' . ($iteration % 5 + 1), // Generate 5 different groups
+        'timestamp_device' => $timestamp,
         'temperature' => 20 + (sin($iteration * 0.1) * 10) + (rand(-5, 5) * 0.1),
         'humidity' => 60 + (cos($iteration * 0.15) * 20) + (rand(-10, 10) * 0.5),
         'pressure' => 1013 + (sin($iteration * 0.05) * 5) + (rand(-2, 2) * 0.1),

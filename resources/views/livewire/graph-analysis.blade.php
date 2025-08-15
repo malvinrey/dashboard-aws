@@ -159,9 +159,12 @@
             document.addEventListener('DOMContentLoaded', function() {
                 // Initialize WebSocket client for real-time data
                 const wsClient = new ScadaWebSocketClient({
-                    url: 'ws://localhost:6001/app/scada-app',
-                    reconnectAttempts: 10,
-                    heartbeatInterval: 30000
+                    serverUrl: 'ws://127.0.0.1:6001',
+                    appKey: 'scada_dashboard_key_2024',
+                    appId: '12345',
+                    cluster: 'mt1',
+                    encrypted: false,
+                    channel: 'scada-data'
                 });
 
                 // Initialize chart manager with throttling

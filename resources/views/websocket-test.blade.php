@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SCADA WebSocket Test</title>
 
-    <!-- Include Pusher and Laravel Echo -->
+    <!-- Include Pusher and SCADA WebSocket Client -->
     <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
-    <script src="{{ asset('js/laravel-echo.js') }}"></script>
+    <script src="{{ asset('js/scada-websocket-client.js') }}"></script>
 
     <style>
         body {
@@ -354,9 +354,6 @@
             </div>
         </div>
     </div>
-
-    <!-- Include our WebSocket client -->
-    <script src="{{ asset('js/scada-websocket-client.js') }}"></script>
 
     <script>
         let wsClient = null;

@@ -65,7 +65,11 @@ try {
         echo "   ✓ Event implements broadcastOn method\n";
 
         $channels = $event->broadcastOn();
-        echo "   ✓ Event broadcasts on channels: " . implode(', ', $channels) . "\n";
+        if (is_array($channels)) {
+            echo "   ✓ Event broadcasts on channels: " . implode(', ', $channels) . "\n";
+        } else {
+            echo "   ✓ Event broadcasts on channel: " . $channels->name . "\n";
+        }
     } else {
         echo "   ✗ Event does not implement broadcastOn method\n";
     }

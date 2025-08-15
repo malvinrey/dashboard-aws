@@ -40,11 +40,16 @@ class ScadaWebSocketClient {
             return;
         }
 
+        // Parse server URL untuk mendapatkan host dan port
+        const url = new URL(this.config.serverUrl);
+        const host = url.hostname;
+        const port = url.port || (url.protocol === "wss:" ? "443" : "80");
+
         this.pusher = new Pusher(this.config.appKey, {
             cluster: this.config.cluster,
             encrypted: this.config.encrypted,
-            wsHost: this.config.serverUrl.replace(/^ws:\/\//, "").split(":")[0],
-            wsPort: parseInt(this.config.serverUrl.split(":")[2]) || 6001,
+            wsHost: host,
+            wsPort: parseInt(port),
             forceTLS: false,
             enabledTransports: ["ws", "wss"],
             disableStats: true,
