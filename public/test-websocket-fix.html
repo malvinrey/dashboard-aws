@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>WebSocket Fix Test - Native Implementation</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+            .container {
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+            .status {
+                padding: 10px;
+                margin: 10px 0;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            .status.success {
+                background-color: #d4edda;
+                color: #155724;
+            }
+            .status.error {
+                background-color: #f8d7da;
+                color: #721c24;
+            }
+            .status.warning {
+                background-color: #fff3cd;
+                color: #856404;
+            }
+            .status.info {
+                background-color: #d1ecf1;
+                color: #0c5460;
+            }
+            .log {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                padding: 15px;
+                margin: 10px 0;
+                max-height: 300px;
+                overflow-y: auto;
+                font-family: monospace;
+                font-size: 12px;
+            }
+            button {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 4px;
+                cursor: pointer;
+                margin: 5px;
+            }
+            button:hover {
+                background-color: #0056b3;
+            }
+            button:disabled {
+                background-color: #6c757d;
+                cursor: not-allowed;
+            }
+            .connection-info {
+                background-color: #e9ecef;
+                padding: 15px;
+                border-radius: 4px;
+                margin: 10px 0;
+            }
+            .connection-info h4 {
+                margin-top: 0;
+                color: #495057;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>WebSocket Fix Test - Native Implementation</h1>
+            <p>
+                Testing the native WebSocket implementation based on
+                WEBSOCKET_IMPLEMENTATION_GUIDE
+            </p>
+
+            <div id="status" class="status info">Initializing...</div>
+
+            <div class="connection-info">
+                <h4>Connection Details:</h4>
+                <p>
+                    <strong>WebSocket URL:</strong>
+                    ws://127.0.0.1:6001/app/scada_dashboard_key_2024
+                </p>
+                <p><strong>Expected Server:</strong> Soketi WebSocket Server</p>
+                <p>
+                    <strong>Protocol:</strong> Native WebSocket (not
+                    Pusher/Echo)
+                </p>
+            </div>
+
+            <div>
+                <button id="testWebSocket" onclick="testWebSocket()">
+                    Test Native WebSocket
+                </button>
+                <button
+                    id="testEchoCompatibility"
+                    onclick="testEchoCompatibility()"
+                >
+                    Test Echo Compatibility
+                </button>
+                <button
+                    id="testChannelSubscription"
+                    onclick="testChannelSubscription()"
+                >
+                    Test Channel Subscription
+                </button>
+                <button id="testLivewire" onclick="testLivewire()">
+                    Test Livewire Compatibility
+                </button>
+                <button id="clearLog" onclick="clearLog()">Clear Log</button>
+            </div>
+
+            <h3>Test Results:</h3>
+            <div id="log" class="log"></div>
+        </div>
+
+        <script src="js/scada-websocket-client.js"></script>
+        <script>
+            let logElement;
+            let statusElement;
+            let websocketClient;
+            let echoClient;
+
+            function log(message, type = "info") {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement("div");
+                logEntry.innerHTML = `<span style="color: #666;">[${timestamp}]</span> ${message}`;
+                logElement.appendChild(logEntry);
+                logElement.scrollTop = logElement.scrollTop + 1000;
+                console.log(message);
+            }
+
+            function updateStatus(message, type = "info") {
+                statusElement.textContent = message;
+                statusElement.className = `status ${type}`;
+            }
+
+            function clearLog() {
+                logElement.innerHTML = "";
+            }
+
+            function testWebSocket() {
+                log("=== Testing Native WebSocket Implementation ===", "info");
+
+                try {
+                    // Test if our client class is available
+                    if (typeof ScadaWebSocketClient === "undefined") {
+                        log("❌ ScadaWebSocketClient is not defined", "error");
+                        return;
+                    }
+
+                    log(
+                        "✅ ScadaWebSocketClient class is available",
+                        "success"
+                    );
+
+                    // Create a test instance
+                    websocketClient = new ScadaWebSocketClient({
+                        url: "ws://127.0.0.1:6001/app/scada_dashboard_key_2024",
+                        onConnect: () => {
+                            log(
+                                "✅ WebSocket client connected successfully",
+                                "success"
+                            );
+                            updateStatus("WebSocket Connected", "success");
+                        },
+                        onError: (error) => {
+                            log(`❌ WebSocket client error: ${error}`, "error");
+                            updateStatus("WebSocket Error", "error");
+                        },
+                        onDisconnect: () => {
+                            log("⚠️ WebSocket client disconnected", "warning");
+                            updateStatus("WebSocket Disconnected", "warning");
+                        },
+                        onMessage: (data) => {
+                            log(
+                                `📨 WebSocket message received: ${JSON.stringify(
+                                    data
+                                )}`,
+                                "info"
+                            );
+                        },
+                    });
+
+                    log("✅ WebSocket client instance created", "success");
+
+                    // Test connection state
+                    setTimeout(() => {
+                        const state = websocketClient.getConnectionState();
+                        log(`📊 Connection state: ${state}`, "info");
+
+                        if (state === "connected") {
+                            log(
+                                "✅ WebSocket connection is healthy",
+                                "success"
+                            );
+                        } else if (state === "connecting") {
+                            log(
+                                "⏳ WebSocket is still connecting...",
+                                "warning"
+                            );
+                        } else {
+                            log(
+                                `❌ WebSocket connection failed: ${state}`,
+                                "error"
+                            );
+                        }
+                    }, 2000);
+                } catch (e) {
+                    log(
+                        `❌ WebSocket client test failed: ${e.message}`,
+                        "error"
+                    );
+                }
+            }
+
+            function testEchoCompatibility() {
+                log("=== Testing Echo Compatibility Layer ===", "info");
+
+                try {
+                    // Test if our Echo compatibility class is available
+                    if (typeof ScadaEchoClient === "undefined") {
+                        log("❌ ScadaEchoClient is not defined", "error");
+                        return;
+                    }
+
+                    log("✅ ScadaEchoClient class is available", "success");
+
+                    // Create Echo compatibility layer
+                    echoClient = new ScadaEchoClient({
+                        host: "127.0.0.1",
+                        port: 6001,
+                        appKey: "scada_dashboard_key_2024",
+                        onConnect: () => {
+                            log(
+                                "✅ Echo compatibility layer connected",
+                                "success"
+                            );
+                        },
+                        onError: (error) => {
+                            log(
+                                `❌ Echo compatibility error: ${error}`,
+                                "error"
+                            );
+                        },
+                    });
+
+                    log("✅ Echo compatibility layer created", "success");
+
+                    // Test if window.Echo exists
+                    if (typeof window.Echo !== "undefined") {
+                        log("✅ Window.Echo created successfully", "success");
+
+                        // Test socketId function
+                        if (typeof window.Echo.socketId === "function") {
+                            try {
+                                const socketId = window.Echo.socketId();
+                                log(
+                                    `✅ Echo.socketId() works: ${socketId}`,
+                                    "success"
+                                );
+                            } catch (e) {
+                                log(
+                                    `❌ Echo.socketId() failed: ${e.message}`,
+                                    "error"
+                                );
+                            }
+                        } else {
+                            log("❌ Echo.socketId is not a function", "error");
+                        }
+                    } else {
+                        log("❌ Window.Echo not created", "error");
+                    }
+                } catch (e) {
+                    log(
+                        `❌ Echo compatibility test failed: ${e.message}`,
+                        "error"
+                    );
+                }
+            }
+
+            function testChannelSubscription() {
+                log("=== Testing Channel Subscription ===", "info");
+
+                if (!websocketClient) {
+                    log(
+                        "❌ WebSocket client not available. Run WebSocket test first.",
+                        "error"
+                    );
+                    return;
+                }
+
+                if (websocketClient.getConnectionState() !== "connected") {
+                    log(
+                        "❌ WebSocket not connected. Cannot test subscription.",
+                        "error"
+                    );
+                    return;
+                }
+
+                try {
+                    // Test channel subscription
+                    const success = websocketClient.subscribe(
+                        "scada-data",
+                        "scada.data.received",
+                        (data) => {
+                            log(
+                                "✅ Channel event handler called with data",
+                                "success"
+                            );
+                            log(
+                                `📊 Event data: ${JSON.stringify(data)}`,
+                                "info"
+                            );
+                        }
+                    );
+
+                    if (success) {
+                        log("✅ Channel subscription successful", "success");
+                        log(
+                            `📊 Subscribed channels: ${websocketClient
+                                .getSubscribedChannels()
+                                .join(", ")}`,
+                            "info"
+                        );
+                    } else {
+                        log("❌ Channel subscription failed", "error");
+                    }
+                } catch (e) {
+                    log(
+                        `❌ Channel subscription test failed: ${e.message}`,
+                        "error"
+                    );
+                }
+            }
+
+            function testLivewire() {
+                log("=== Testing Livewire Compatibility ===", "info");
+
+                try {
+                    // Test if Echo is properly initialized for Livewire
+                    if (typeof window.Echo === "undefined") {
+                        log("❌ Window.Echo is not available", "error");
+                        return;
+                    }
+
+                    if (typeof window.Echo.socketId !== "function") {
+                        log(
+                            "❌ Echo.socketId is not a function - Livewire will fail",
+                            "error"
+                        );
+                        return;
+                    }
+
+                    // Test channel subscription (Livewire compatibility)
+                    try {
+                        const channel = window.Echo.channel("test-channel");
+                        log("✅ Echo.channel() works", "success");
+
+                        // Test listening (Livewire compatibility)
+                        channel.listen(".test-event", (data) => {
+                            log("✅ Echo.listen() works", "success");
+                        });
+
+                        log("✅ Echo.listen() setup successful", "success");
+                    } catch (e) {
+                        log(
+                            `❌ Echo channel/listen test failed: ${e.message}`,
+                            "error"
+                        );
+                    }
+
+                    log("✅ Livewire compatibility test completed", "success");
+                } catch (e) {
+                    log(
+                        `❌ Livewire compatibility test failed: ${e.message}`,
+                        "error"
+                    );
+                }
+            }
+
+            // Initialize when page loads
+            document.addEventListener("DOMContentLoaded", function () {
+                logElement = document.getElementById("log");
+                statusElement = document.getElementById("status");
+
+                log("Page loaded, starting tests...", "info");
+                updateStatus("Ready for testing", "info");
+
+                // Auto-run basic tests
+                setTimeout(() => {
+                    testWebSocket();
+                }, 1000);
+            });
+        </script>
+    </body>
+</html>

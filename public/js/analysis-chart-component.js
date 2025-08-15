@@ -1,5 +1,5 @@
 // public/js/analysis-chart-component.js
-// Alpine.js Component untuk Analysis Chart
+// Alpine.js Component untuk Analysis Chart dengan WebSocket Integration
 
 // ========================================
 // IMMEDIATE FIXES IMPLEMENTATION
@@ -89,165 +89,168 @@ class DataBuffer {
     }
 }
 
-// 3. SSE Connection Resilience
-class SSEManager {
-    constructor(url, options = {}) {
-        this.url = url;
-        this.options = {
-            maxReconnectAttempts: 5,
-            initialReconnectDelay: 1000,
-            maxReconnectDelay: 30000,
-            ...options,
+// 3. WebSocket Connection Manager (Replaces SSE)
+class WebSocketManager {
+    constructor(config = {}) {
+        this.config = {
+            host: config.host || "127.0.0.1",
+            port: config.port || 6001,
+            appKey: config.appKey || "scada_dashboard_key_2024",
+            reconnectAttempts: config.reconnectAttempts || 5,
+            initialReconnectDelay: config.initialReconnectDelay || 2000,
+            maxReconnectDelay: config.maxReconnectDelay || 10000,
+            ...config,
         };
 
-        this.eventSource = null;
+        this.websocketClient = null;
+        this.isConnected = false;
         this.reconnectAttempts = 0;
         this.reconnectTimer = null;
-        this.isConnecting = false;
-        this.onMessage = null;
-        this.onError = null;
-        this.onConnect = null;
+        this.subscribedChannels = new Set();
+
+        // Event handlers
+        this.onMessage = config.onMessage || (() => {});
+        this.onConnect = config.onConnect || (() => {});
+        this.onError = config.onError || (() => {});
+        this.onDisconnect = config.onDisconnect || (() => {});
     }
 
     connect() {
-        if (this.isConnecting) return;
+        try {
+            // Create WebSocket client
+            this.websocketClient = new ScadaWebSocketClient({
+                url: `ws://${this.config.host}:${this.config.port}/app/${this.config.appKey}`,
+                reconnectAttempts: this.config.reconnectAttempts,
+                reconnectDelay: this.config.initialReconnectDelay,
+                maxReconnectDelay: this.config.maxReconnectDelay,
+                onConnect: () => {
+                    console.log("WebSocket connected successfully");
+                    this.isConnected = true;
+                    this.reconnectAttempts = 0;
+                    this.onConnect();
 
-        this.isConnecting = true;
-        console.log(`Connecting to SSE: ${this.url}`);
+                    // Resubscribe to channels after reconnection
+                    this.resubscribeChannels();
+                },
+                onMessage: (data) => {
+                    this.onMessage(data);
+                },
+                onError: (error) => {
+                    console.error("WebSocket error:", error);
+                    this.onError(error);
+                },
+                onDisconnect: () => {
+                    console.log("WebSocket disconnected");
+                    this.isConnected = false;
+                    this.onDisconnect();
+                },
+            });
+
+            console.log("WebSocket manager initialized");
+        } catch (error) {
+            console.error("Failed to initialize WebSocket manager:", error);
+            this.onError(error);
+        }
+    }
+
+    subscribe(channelName, eventName = null, handler = null) {
+        if (!this.websocketClient || !this.isConnected) {
+            console.warn("WebSocket not connected, cannot subscribe");
+            return false;
+        }
 
         try {
-            this.eventSource = new EventSource(this.url);
-            this.setupEventHandlers();
+            const success = this.websocketClient.subscribe(
+                channelName,
+                eventName,
+                handler
+            );
+            if (success) {
+                this.subscribedChannels.add(channelName);
+                console.log(`Subscribed to channel: ${channelName}`);
+            }
+            return success;
         } catch (error) {
-            console.error("Failed to create EventSource:", error);
-            this.handleConnectionError();
+            console.error(
+                `Failed to subscribe to channel ${channelName}:`,
+                error
+            );
+            return false;
         }
     }
 
-    setupEventHandlers() {
-        this.eventSource.onopen = () => {
-            console.log("SSE connection established");
-            this.isConnecting = false;
-            this.reconnectAttempts = 0;
+    unsubscribe(channelName) {
+        if (!this.websocketClient) return false;
 
-            if (this.onConnect) {
-                this.onConnect();
+        try {
+            const success = this.websocketClient.unsubscribe(channelName);
+            if (success) {
+                this.subscribedChannels.delete(channelName);
+                console.log(`Unsubscribed from channel: ${channelName}`);
             }
-        };
-
-        this.eventSource.onmessage = (event) => {
-            if (this.onMessage) {
-                this.onMessage(event);
-            }
-        };
-
-        this.eventSource.onerror = (event) => {
-            console.error("SSE connection error:", event);
-            this.handleConnectionError();
-        };
-    }
-
-    handleConnectionError() {
-        this.isConnecting = false;
-
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-        }
-
-        if (this.reconnectAttempts < this.options.maxReconnectAttempts) {
-            this.scheduleReconnect();
-        } else {
-            console.error("Max reconnection attempts reached");
-            if (this.onError) {
-                this.onError(new Error("Max reconnection attempts reached"));
-            }
+            return success;
+        } catch (error) {
+            console.error(
+                `Failed to unsubscribe from channel ${channelName}:`,
+                error
+            );
+            return false;
         }
     }
 
-    scheduleReconnect() {
-        const delay = Math.min(
-            this.options.initialReconnectDelay *
-                Math.pow(2, this.reconnectAttempts),
-            this.options.maxReconnectDelay
-        );
-
-        console.log(
-            `Scheduling reconnection attempt ${
-                this.reconnectAttempts + 1
-            } in ${delay}ms`
-        );
-
-        this.reconnectTimer = setTimeout(() => {
-            this.reconnectAttempts++;
-            this.connect();
-        }, delay);
+    resubscribeChannels() {
+        // This will be called after reconnection to restore subscriptions
+        console.log("Resubscribing to channels after reconnection");
+        // The actual resubscription logic will be handled by the component
     }
 
     disconnect() {
+        if (this.websocketClient) {
+            this.websocketClient.disconnect();
+            this.websocketClient = null;
+        }
+        this.isConnected = false;
+        this.subscribedChannels.clear();
+
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
         }
-
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-        }
-
-        this.isConnecting = false;
     }
 
-    setMessageHandler(handler) {
-        this.onMessage = handler;
+    getConnectionState() {
+        return this.websocketClient
+            ? this.websocketClient.getConnectionState()
+            : "disconnected";
     }
 
-    setErrorHandler(handler) {
-        this.onError = handler;
-    }
-
-    setConnectHandler(handler) {
-        this.onConnect = handler;
+    isConnectionHealthy() {
+        return this.websocketClient
+            ? this.websocketClient.isConnectionHealthy()
+            : false;
     }
 }
 
-// 4. Memory Management
+// 4. Chart Data Manager
 class ChartDataManager {
-    constructor(maxDataPoints = 1000, cleanupInterval = 30000) {
-        this.maxDataPoints = maxDataPoints;
+    constructor(maxPoints = 1000, cleanupInterval = 30000) {
+        this.maxPoints = maxPoints;
         this.cleanupInterval = cleanupInterval;
-        this.chartData = [];
         this.cleanupTimer = null;
         this.startCleanupTimer();
     }
 
     addData(data) {
-        this.chartData.push({
-            ...data,
+        // Add data point
+        this.dataPoints.push({
+            data: data,
             timestamp: Date.now(),
         });
 
-        // Batasi jumlah data points
-        if (this.chartData.length > this.maxDataPoints) {
-            this.chartData = this.chartData.slice(-this.maxDataPoints);
+        // Limit data points
+        if (this.dataPoints.length > this.maxPoints) {
+            this.dataPoints = this.dataPoints.slice(-this.maxPoints);
         }
-    }
-
-    getData() {
-        return this.chartData;
-    }
-
-    cleanup() {
-        const now = Date.now();
-        const maxAge = 5 * 60 * 1000; // 5 menit
-
-        this.chartData = this.chartData.filter(
-            (item) => now - item.timestamp < maxAge
-        );
-
-        console.log(
-            `Cleaned up chart data. Remaining: ${this.chartData.length} points`
-        );
     }
 
     startCleanupTimer() {
@@ -262,11 +265,25 @@ class ChartDataManager {
             this.cleanupTimer = null;
         }
     }
+
+    cleanup() {
+        const now = Date.now();
+        const cutoff = now - this.cleanupInterval;
+
+        this.dataPoints = this.dataPoints.filter(
+            (point) => point.timestamp > cutoff
+        );
+    }
+
+    getDataPoints() {
+        return this.dataPoints;
+    }
 }
 
-// 5. Performance Monitoring
+// 5. Performance Tracker
 class PerformanceTracker {
     constructor() {
+        this.startTime = Date.now();
         this.metrics = {
             renderCount: 0,
             dataReceived: 0,
@@ -275,28 +292,21 @@ class PerformanceTracker {
             memoryUsage: 0,
         };
 
-        this.startTime = Date.now();
+        // Start monitoring
         this.startMonitoring();
     }
 
     startMonitoring() {
-        setInterval(() => {
-            this.updateMetrics();
+        this.monitoringInterval = setInterval(() => {
+            this.updateMemoryUsage();
             this.checkThresholds();
             this.logMetrics();
-        }, 5000); // Update setiap 5 detik
+        }, 30000); // Every 30 seconds
     }
 
-    updateMetrics() {
-        // Update memory usage
+    updateMemoryUsage() {
         if (performance.memory) {
             this.metrics.memoryUsage = performance.memory.usedJSHeapSize;
-        }
-
-        // Calculate render performance
-        if (this.metrics.renderCount > 0) {
-            this.metrics.averageRenderTime =
-                (Date.now() - this.startTime) / this.metrics.renderCount;
         }
     }
 
@@ -348,13 +358,14 @@ class PerformanceTracker {
 document.addEventListener("alpine:init", () => {
     Alpine.data("analysisChartComponent", () => ({
         // Properti untuk menyimpan instance dari worker dan chart
-        sseWorker: null,
         plotlyChart: null,
+
+        // WebSocket manager (replaces SSE)
+        websocketManager: null,
 
         // Immediate fixes components
         chartThrottler: null,
         dataBuffer: null,
-        sseManager: null,
         chartDataManager: null,
         performanceTracker: null,
 
@@ -407,7 +418,9 @@ document.addEventListener("alpine:init", () => {
 
         // Fungsi inisialisasi utama yang akan dipanggil oleh x-init
         initComponent() {
-            console.log("Initializing Alpine component from external file...");
+            console.log(
+                "Initializing Alpine component with WebSocket integration..."
+            );
 
             // Initialize immediate fixes components
             this.initImmediateFixes();
@@ -436,7 +449,7 @@ document.addEventListener("alpine:init", () => {
 
             this.initPlotlyChart();
             this.setupEventListeners();
-            this.startSseConnection();
+            this.startWebSocketConnection();
 
             // Listener untuk event dari backend Livewire setelah data historis siap
             window.Livewire.on("historicalDataLoaded", (event) => {
@@ -459,12 +472,34 @@ document.addEventListener("alpine:init", () => {
             // Initialize data buffer with 50 items or 1 second flush
             this.dataBuffer = new DataBuffer(50, 1000);
 
-            // Initialize SSE manager with robust reconnection
-            // Note: SSE endpoint might not be available yet, so we'll handle connection errors gracefully
-            this.sseManager = new SSEManager("/api/sse/stream", {
-                maxReconnectAttempts: 5, // Reduced attempts since endpoint might not exist
+            // Initialize WebSocket manager (replaces SSE)
+            this.websocketManager = new WebSocketManager({
+                host: "127.0.0.1",
+                port: 6001,
+                appKey: "scada_dashboard_key_2024",
+                reconnectAttempts: 5,
                 initialReconnectDelay: 2000,
                 maxReconnectDelay: 10000,
+                onMessage: this.handleWebSocketMessage.bind(this),
+                onConnect: () => {
+                    console.log("WebSocket connected successfully");
+                    this.state.isConnected = true;
+                    this.updateConnectionStatus();
+                    this.hideConnectionError();
+                },
+                onError: (error) => {
+                    console.error("WebSocket connection failed:", error);
+                    this.state.isConnected = false;
+                    this.updateConnectionStatus();
+                    this.showError(
+                        "WebSocket Connection Error: " + error.message
+                    );
+                },
+                onDisconnect: () => {
+                    console.log("WebSocket disconnected");
+                    this.state.isConnected = false;
+                    this.updateConnectionStatus();
+                },
             });
 
             // Initialize chart data manager with 1000 max points and 30s cleanup
@@ -490,28 +525,11 @@ document.addEventListener("alpine:init", () => {
                     }
                 );
             });
-
-            // Set up SSE manager handlers
-            this.sseManager.setMessageHandler(this.handleSSEMessage.bind(this));
-            this.sseManager.setErrorHandler((error) => {
-                console.error("SSE connection failed:", error);
-                this.state.isConnected = false;
-                this.updateConnectionStatus();
-                this.showError("SSE Connection Error: " + error.message);
-            });
-            this.sseManager.setConnectHandler(() => {
-                console.log("SSE reconnected successfully");
-                this.state.isConnected = true;
-                this.updateConnectionStatus();
-                this.hideConnectionError();
-            });
         },
 
-        // Handle SSE message with throttling and buffering
-        handleSSEMessage(event) {
+        // Handle WebSocket message with throttling and buffering
+        handleWebSocketMessage(data) {
             try {
-                const data = JSON.parse(event.data);
-
                 // Record data received for performance tracking
                 this.performanceTracker.recordDataReceived();
 
@@ -521,7 +539,7 @@ document.addEventListener("alpine:init", () => {
                 // Add to chart data manager for memory management
                 this.chartDataManager.addData(data);
             } catch (error) {
-                console.error("Error parsing SSE data:", error);
+                console.error("Error processing WebSocket data:", error);
             }
         },
 
@@ -550,50 +568,66 @@ document.addEventListener("alpine:init", () => {
                         } else if (data[`min_${channel}`] !== undefined) {
                             value = data[`min_${channel}`];
                         }
-                    } else {
+                    } else if (data.timestamp_device) {
                         // Raw data
                         value = data[channel];
                     }
 
-                    if (value !== undefined && value !== null) {
-                        channelData.push(value);
+                    if (value !== null) {
+                        channelData.push({
+                            timestamp:
+                                data.time_bucket || data.timestamp_device,
+                            value: value,
+                        });
                     }
                 });
 
                 if (channelData.length > 0) {
-                    // Use the latest value
-                    aggregated[channel] = channelData[channelData.length - 1];
+                    // Take the latest value
+                    const latest = channelData[channelData.length - 1];
+                    aggregated[channel] = {
+                        timestamp: latest.timestamp,
+                        value: latest.value,
+                    };
                 }
             });
-
-            // Add timestamp
-            const lastData = bufferedData[bufferedData.length - 1].data;
-            aggregated.terminal_time =
-                lastData.time_bucket ||
-                lastData.timestamp_device ||
-                lastData.terminal_time ||
-                new Date().toISOString();
 
             return aggregated;
         },
 
         // Update chart with throttled data
         updateChartWithThrottledData(data) {
-            if (!this.plotlyChart || !this.dataConfig.realtimeEnabled) return;
-
-            // Record render for performance tracking
-            this.performanceTracker.recordRender();
+            if (!this.plotlyChart || !data) return;
 
             try {
-                // Update chart with new data
-                this.updatePlotlyRealtime(data);
-                console.log("Chart updated successfully with throttled data");
+                const updates = {};
+                const traces = [];
+
+                Object.keys(data).forEach((channel, index) => {
+                    const channelData = data[channel];
+                    if (
+                        channelData &&
+                        channelData.timestamp &&
+                        channelData.value !== null
+                    ) {
+                        updates[`x[${index}]`] = [channelData.timestamp];
+                        updates[`y[${index}]`] = [channelData.value];
+                        traces.push(index);
+                    }
+                });
+
+                if (Object.keys(updates).length > 0) {
+                    Plotly.extendTraces(this.plotlyChart, updates, traces);
+                }
             } catch (error) {
-                console.error("Error updating chart:", error);
+                console.error(
+                    "Error updating chart with throttled data:",
+                    error
+                );
             }
         },
 
-        // Setup event listeners untuk UI controls
+        // Setup event listeners
         setupEventListeners() {
             // Chart type selector
             document.addEventListener("change", (e) => {
@@ -705,74 +739,64 @@ document.addEventListener("alpine:init", () => {
                 responsive: true,
                 displayModeBar: true,
                 modeBarButtonsToRemove: ["pan2d", "lasso2d", "select2d"],
-                displaylogo: false,
             };
 
-            // Membuat chart Plotly baru dengan data kosong
             Plotly.newPlot(chartDiv, [], layout, config);
             this.plotlyChart = chartDiv;
 
-            // Setup event listeners untuk chart
-            chartDiv.on("plotly_relayout", (eventData) => {
-                this.handleChartRelayout(eventData);
-            });
+            // Bind chart events
+            this.plotlyChart.on(
+                "plotly_relayout",
+                this.handleChartRelayout.bind(this)
+            );
+
+            console.log("Plotly chart initialized successfully");
         },
 
-        // Fungsi untuk memulai koneksi SSE menggunakan SSEManager
-        startSseConnection() {
-            if (this.sseManager) {
+        // Start WebSocket connection (replaces SSE)
+        startWebSocketConnection() {
+            if (this.websocketManager) {
                 // Disconnect existing connection
-                this.sseManager.disconnect();
+                this.websocketManager.disconnect();
             }
 
-            // Check if we're in a test environment or if SSE is disabled
+            // Check if we're in a test environment
             if (
                 window.location.pathname.includes("test-immediate-fixes.html")
             ) {
-                console.log("SSE connection skipped in test environment");
+                console.log("WebSocket connection skipped in test environment");
                 this.state.isConnected = true; // Simulate connection for testing
                 this.updateConnectionStatus();
                 return;
             }
 
             try {
-                // Build SSE URL with required parameters
-                const params = new URLSearchParams();
-                const tags =
-                    this.state.selectedChannels &&
-                    this.state.selectedChannels.length > 0
-                        ? this.state.selectedChannels
-                        : Array.isArray(window.ANALYSIS_DEFAULT_TAGS)
-                        ? window.ANALYSIS_DEFAULT_TAGS
-                        : [];
+                // Connect to WebSocket
+                this.websocketManager.connect();
 
-                // Append tags[] properly
-                tags.forEach((t) => params.append("tags[]", t));
+                // Subscribe to SCADA data channel
+                setTimeout(() => {
+                    if (this.websocketManager.isConnected) {
+                        this.websocketManager.subscribe(
+                            "scada-data",
+                            "scada.data.received",
+                            (data) => {
+                                console.log(
+                                    "SCADA data received via WebSocket:",
+                                    data
+                                );
+                            }
+                        );
 
-                // Determine aggregation level from UI selection
-                const aggEl = document.querySelector(
-                    'select[name="aggregationInterval"]'
-                );
-                let level = "second";
-                if (aggEl) {
-                    const val = parseInt(aggEl.value, 10);
-                    if (val >= 60 && val < 3600) level = "minute";
-                    else if (val >= 3600 && val < 86400) level = "hour";
-                    else if (val >= 86400) level = "day";
-                }
-                params.set("interval", level);
-
-                const sseUrl = `/api/sse/stream?${params.toString()}`;
-
-                // Update SSE manager URL and connect
-                this.sseManager.url = sseUrl;
-                this.sseManager.connect();
-
-                console.log("SSE connection started with SSEManager");
+                        console.log(
+                            "WebSocket connection started and subscribed to scada-data channel"
+                        );
+                    }
+                }, 1000);
             } catch (error) {
-                console.error("Failed to start SSE connection:", error);
+                console.error("Failed to start WebSocket connection:", error);
                 this.showError(
-                    "Failed to start SSE connection: " + error.message
+                    "Failed to start WebSocket connection: " + error.message
                 );
             }
         },
@@ -903,149 +927,18 @@ document.addEventListener("alpine:init", () => {
                         value = d[channel];
                     }
 
-                    if (value !== null && value !== undefined) {
+                    if (value !== null && timestamp) {
                         traces[channel].x.push(timestamp);
                         traces[channel].y.push(value);
                     }
                 });
             });
 
-            // Debug: Log the data structure to understand what we're working with
-            console.log("Data structure analysis:", {
-                sampleData: initialData[0],
-                availableKeys: Object.keys(initialData[0] || {}),
-                selectedChannels: channels,
-                dataLength: initialData.length,
-            });
+            // Update chart
+            const traceArray = Object.values(traces);
+            Plotly.react(this.plotlyChart, traceArray);
 
-            // Filter traces yang memiliki data
-            const validTraces = Object.values(traces).filter(
-                (trace) => trace.x.length > 0
-            );
-
-            if (validTraces.length > 0) {
-                Plotly.react(this.plotlyChart, validTraces);
-                console.log(
-                    "Chart populated with",
-                    validTraces.length,
-                    "traces"
-                );
-            } else {
-                console.warn(
-                    "No valid data traces found, creating empty trace"
-                );
-
-                // Create an empty trace to prevent chart errors
-                const emptyTrace = {
-                    x: [],
-                    y: [],
-                    mode: "lines",
-                    name: "No Data",
-                    line: { color: "#cccccc", width: 1 },
-                    type: "scatter",
-                };
-
-                Plotly.react(this.plotlyChart, [emptyTrace]);
-                console.log("Chart initialized with empty trace");
-            }
-        },
-
-        // Fungsi untuk menambahkan data real-time ke chart Plotly
-        updatePlotlyRealtime(newData) {
-            if (!this.plotlyChart || !this.dataConfig.realtimeEnabled) return;
-
-            // Tambahkan ke buffer
-            this.state.dataBuffer.push(newData);
-
-            // Batasi ukuran buffer
-            if (this.state.dataBuffer.length > this.dataConfig.bufferSize) {
-                this.state.dataBuffer.shift();
-            }
-
-            // Update chart dengan data baru
-            this.updateChartWithBuffer();
-        },
-
-        // Update chart dengan data dari buffer
-        updateChartWithBuffer() {
-            if (!this.plotlyChart || this.state.dataBuffer.length === 0) return;
-
-            const channels = this.state.selectedChannels;
-            const updates = {};
-            const traces = [];
-
-            // Siapkan update untuk setiap channel
-            channels.forEach((channel, index) => {
-                const channelData = this.state.dataBuffer.filter((d) => {
-                    // Handle both raw and aggregated data
-                    if (d.time_bucket) {
-                        // Aggregated data
-                        return (
-                            d[`avg_${channel}`] !== undefined ||
-                            d[`max_${channel}`] !== undefined ||
-                            d[`min_${channel}`] !== undefined
-                        );
-                    } else {
-                        // Raw data
-                        return d[channel] !== undefined && d[channel] !== null;
-                    }
-                });
-
-                if (channelData.length > 0) {
-                    const timestamps = channelData.map(
-                        (d) =>
-                            d.time_bucket ||
-                            d.timestamp_device ||
-                            d.terminal_time
-                    );
-
-                    const values = channelData.map((d) => {
-                        if (d.time_bucket) {
-                            // Aggregated data - prefer average
-                            return (
-                                d[`avg_${channel}`] ||
-                                d[`max_${channel}`] ||
-                                d[`min_${channel}`]
-                            );
-                        } else {
-                            // Raw data
-                            return d[channel];
-                        }
-                    });
-
-                    updates[`x[${index}]`] = timestamps;
-                    updates[`y[${index}]`] = values;
-                    traces.push(index);
-                }
-            });
-
-            // Update chart jika ada data
-            if (Object.keys(updates).length > 0) {
-                Plotly.extendTraces(this.plotlyChart, updates, traces);
-
-                // Auto-scroll jika chart sedang zoom
-                const layout = this.plotlyChart.layout;
-                if (layout.xaxis && layout.xaxis.range) {
-                    // Chart sedang di-zoom, jangan auto-scroll
-                } else {
-                    // Auto-scroll ke data terbaru
-                    const firstTime =
-                        this.state.dataBuffer[0].time_bucket ||
-                        this.state.dataBuffer[0].timestamp_device ||
-                        this.state.dataBuffer[0].terminal_time;
-                    const lastTime =
-                        this.state.dataBuffer[this.state.dataBuffer.length - 1]
-                            .time_bucket ||
-                        this.state.dataBuffer[this.state.dataBuffer.length - 1]
-                            .timestamp_device ||
-                        this.state.dataBuffer[this.state.dataBuffer.length - 1]
-                            .terminal_time;
-
-                    Plotly.relayout(this.plotlyChart, {
-                        "xaxis.range": [firstTime, lastTime],
-                    });
-                }
-            }
+            console.log("Chart populated with historical data");
         },
 
         // Handle chart relayout (zoom, pan, etc.)
@@ -1133,15 +1026,14 @@ document.addEventListener("alpine:init", () => {
         // Start realtime updates
         startRealtimeUpdates() {
             this.dataConfig.realtimeEnabled = true;
-            this.startSseConnection();
+            this.startWebSocketConnection();
         },
 
         // Stop realtime updates
         stopRealtimeUpdates() {
             this.dataConfig.realtimeEnabled = false;
-            if (this.sseWorker) {
-                this.sseWorker.terminate();
-                this.sseWorker = null;
+            if (this.websocketManager) {
+                this.websocketManager.disconnect();
             }
         },
 
@@ -1267,9 +1159,9 @@ document.addEventListener("alpine:init", () => {
 
         // Cleanup function
         cleanup() {
-            // Cleanup SSE manager
-            if (this.sseManager) {
-                this.sseManager.disconnect();
+            // Cleanup WebSocket manager
+            if (this.websocketManager) {
+                this.websocketManager.disconnect();
             }
 
             // Cleanup chart data manager
@@ -1301,7 +1193,7 @@ document.addEventListener("alpine:init", () => {
                 testCount++;
 
                 // Simulate high-frequency data
-                this.handleNewData({
+                this.handleWebSocketMessage({
                     timestamp: Date.now(),
                     value: Math.random() * 100,
                     channel: "CH1",
