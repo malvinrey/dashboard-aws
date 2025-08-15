@@ -61,8 +61,10 @@ function generateScadaData($iteration)
         'humidity' => 60 + (cos($iteration * 0.15) * 20) + (rand(-10, 10) * 0.5),
         'pressure' => 1013 + (sin($iteration * 0.05) * 5) + (rand(-2, 2) * 0.1),
         'wind_speed' => 5 + (sin($iteration * 0.2) * 15) + (rand(-3, 3) * 0.5),
+        'wind_direction' => rand(0, 360), // Generate wind direction 0-360 degrees
         'rainfall' => max(0, (sin($iteration * 0.3) * 2) + (rand(0, 5) * 0.1)),
         'solar_radiation' => max(0, 800 + (sin($iteration * 0.1) * 200) + (rand(-50, 50) * 2)),
+        'par_sensor' => max(0, 400 + (sin($iteration * 0.08) * 150) + (rand(-30, 30) * 1.5)), // Generate PAR sensor data
         'iteration' => $iteration
     ];
 }

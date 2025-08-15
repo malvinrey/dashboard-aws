@@ -237,46 +237,56 @@ class ScadaEchoClient {
     }
 
     /**
-     * Initialize Laravel Echo
+     * Initialize Laravel Echo compatibility layer
      */
     initializeEcho() {
-        if (typeof Echo === "undefined") {
+        // Pastikan pustaka Pusher dan Echo tersedia
+        if (typeof Pusher === "undefined" || typeof Echo === "undefined") {
             console.error(
-                "Laravel Echo not loaded. Please include laravel-echo in your HTML."
+                "Pusher.js or Laravel Echo is not loaded. Cannot initialize Echo."
             );
             return;
         }
 
-        window.Echo = new Echo({
-            broadcaster: "pusher",
-            key: this.config.appKey,
-            cluster: this.config.cluster,
-            encrypted: this.config.encrypted,
-            wsHost: this.config.serverUrl
-                .replace(/^https?:\/\//, "")
-                .split(":")[0],
-            wsPort: parseInt(this.config.serverUrl.split(":")[2]) || 6001,
-            forceTLS: false,
-            enabledTransports: ["ws", "wss"],
-            disableStats: true,
-            authEndpoint: "/broadcasting/auth",
-        });
+        // Hindari inisialisasi ganda
+        if (window.Echo && window.Echo.socketId()) {
+            console.log("Laravel Echo is already initialized.");
+            return;
+        }
 
-        // Bind connection events
-        window.Echo.connector.pusher.connection.bind("connected", () => {
-            console.log("Connected via Laravel Echo");
-            this.config.onConnect();
-        });
+        // Hapus layer kompatibilitas lama jika ada
+        if (window.Echo && !window.Echo.socketId) {
+            delete window.Echo;
+        }
 
-        window.Echo.connector.pusher.connection.bind("disconnected", () => {
-            console.log("Disconnected via Laravel Echo");
-            this.config.onDisconnect();
-        });
+        // Inisialisasi instance Laravel Echo yang sesungguhnya
+        try {
+            window.Echo = new Echo({
+                broadcaster: "pusher",
+                key: this.config.appKey || "scada_dashboard_key_2024",
+                cluster: this.config.cluster || "mt1",
+                wsHost: this.config.host || "127.0.0.1",
+                wsPort: this.config.port || 6001,
+                wssPort: this.config.port || 6001,
+                forceTLS: false,
+                enabledTransports: ["ws", "wss"],
+                disableStats: true,
+            });
 
-        window.Echo.connector.pusher.connection.bind("error", (error) => {
-            console.error("Echo connection error:", error);
-            this.config.onError(error);
-        });
+            console.log(
+                "Real Laravel Echo instance initialized for Livewire compatibility."
+            );
+
+            // Panggil onConnect setelah Echo siap
+            window.Echo.connector.pusher.connection.bind("connected", () => {
+                console.log("Echo connected successfully!");
+                if (typeof this.config.onConnect === "function") {
+                    this.config.onConnect();
+                }
+            });
+        } catch (e) {
+            console.error("Failed to initialize Laravel Echo:", e);
+        }
     }
 
     /**

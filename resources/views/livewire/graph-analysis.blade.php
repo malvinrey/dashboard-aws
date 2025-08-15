@@ -6,6 +6,8 @@
 <div>
     {{-- Sertakan file JavaScript WebSocket dan komponen Alpine --}}
     @push('scripts')
+        <!-- Include Pusher library for WebSocket client -->
+        <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
         <script src="{{ asset('js/scada-websocket-client.js') }}" defer></script>
         <script src="{{ asset('js/scada-chart-manager.js') }}" defer></script>
         <script src="{{ asset('js/analysis-chart-component.js') }}" defer></script>
@@ -157,12 +159,22 @@
         <!-- WebSocket Integration Script -->
         <script>
             document.addEventListener('DOMContentLoaded', function() {
+                // Initialize Laravel Echo for compatibility
+                if (typeof ScadaEchoClient !== 'undefined') {
+                    new ScadaEchoClient({
+                        serverUrl: 'http://127.0.0.1:6001',
+                        appKey: '{{ env('PUSHER_APP_KEY', 'scada_dashboard_key_2024') }}',
+                        cluster: '{{ env('PUSHER_APP_CLUSTER', 'mt1') }}'
+                    });
+                    console.log('Laravel Echo initialized for compatibility.');
+                }
+
                 // Initialize WebSocket client for real-time data
                 const wsClient = new ScadaWebSocketClient({
                     serverUrl: 'ws://127.0.0.1:6001',
-                    appKey: 'scada_dashboard_key_2024',
-                    appId: '12345',
-                    cluster: 'mt1',
+                    appKey: '{{ env('PUSHER_APP_KEY', 'scada_dashboard_key_2024') }}',
+                    appId: '{{ env('PUSHER_APP_ID', '12345') }}',
+                    cluster: '{{ env('PUSHER_APP_CLUSTER', 'mt1') }}',
                     encrypted: false,
                     channel: 'scada-data'
                 });
