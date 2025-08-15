@@ -31,7 +31,7 @@ File `env.clean` berisi konfigurasi environment yang bersih dan lengkap untuk SC
     - `SCADA_MAX_RECORDS` - Maksimal record yang disimpan (default: 10000)
     - `SCADA_CACHE_TTL` - Cache TTL dalam detik (default: 300)
     - `SCADA_REALTIME_ENABLED` - Enable realtime updates (default: true)
-    - `SCADA_SSE_ENABLED` - Enable Server-Sent Events (default: true)
+    - `SCADA_WEBSOCKET_ENABLED` - Enable WebSocket connections (default: true)
 
 ## Konfigurasi yang Sudah Dihapus
 
@@ -44,7 +44,7 @@ File `env.clean` berisi konfigurasi environment yang bersih dan lengkap untuk SC
 -   Konfigurasi database MySQL yang lengkap
 -   Pengaturan Laravel standar
 -   Konfigurasi SCADA khusus
--   Pengaturan untuk realtime dan SSE
+-   Pengaturan untuk realtime dan WebSocket
 
 ## Setelah Setup
 

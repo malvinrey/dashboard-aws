@@ -6,7 +6,7 @@
  * Script ini akan menguji implementasi immediate fixes yang sudah diterapkan:
  * 1. Chart Throttling
  * 2. Data Buffering
- * 3. SSE Connection Resilience
+ * 3. WebSocket Connection Resilience
  * 4. Memory Management
  * 5. Performance Monitoring
  */
@@ -24,11 +24,11 @@ if (file_exists($jsFile)) {
     $checks = [
         'ChartThrottler' => 'ChartThrottler class found',
         'DataBuffer' => 'DataBuffer class found',
-        'SSEManager' => 'SSEManager class found',
+        'WebSocket' => 'WebSocket implementation found',
         'ChartDataManager' => 'ChartDataManager class found',
         'PerformanceTracker' => 'PerformanceTracker class found',
         'initImmediateFixes' => 'initImmediateFixes method found',
-        'handleSSEMessage' => 'handleSSEMessage method found',
+        'handleWebSocketMessage' => 'handleWebSocketMessage method found',
         'aggregateData' => 'aggregateData method found',
         'updateChartWithThrottledData' => 'updateChartWithThrottledData method found'
     ];
@@ -63,17 +63,17 @@ if (file_exists($jsFile)) {
     echo "✗ analysis-chart-component.js file not found\n";
 }
 
-// Test 2: Check if SSE endpoint exists
-echo "\n=== Testing SSE Endpoint ===\n";
-$sseEndpoint = '/api/sse/stream';
-echo "SSE endpoint: {$sseEndpoint}\n";
+// Test 2: Check if WebSocket endpoint exists
+echo "\n=== Testing WebSocket Endpoint ===\n";
+$websocketEndpoint = 'ws://127.0.0.1:6001';
+echo "WebSocket endpoint: {$websocketEndpoint}\n";
 
 // Test 3: Check if required dependencies are available
 echo "\n=== Checking Dependencies ===\n";
 $dependencies = [
     'Plotly' => 'Plotly.js for chart rendering',
     'Alpine.js' => 'Alpine.js for component management',
-    'EventSource' => 'EventSource API for SSE'
+    'WebSocket' => 'WebSocket API for real-time communication'
 ];
 
 foreach ($dependencies as $dep => $description) {
@@ -108,8 +108,8 @@ foreach ($config as $setting => $value) {
     echo "✓ {$setting}: {$value}\n";
 }
 
-// Test 6: SSE resilience features
-echo "\n=== SSE Connection Resilience ===\n";
+// Test 6: WebSocket resilience features
+echo "\n=== WebSocket Connection Resilience ===\n";
 $resilienceFeatures = [
     'Automatic reconnection' => 'Exponential backoff',
     'Max reconnection attempts' => '10 attempts',
@@ -127,7 +127,7 @@ echo "\n=== Test Summary ===\n";
 echo "The immediate fixes implementation includes:\n";
 echo "1. Chart throttling to prevent excessive updates\n";
 echo "2. Data buffering to batch process incoming data\n";
-echo "3. Robust SSE connection with automatic reconnection\n";
+echo "3. Robust WebSocket connection with automatic reconnection\n";
 echo "4. Memory management with automatic cleanup\n";
 echo "5. Performance monitoring and alerting\n";
 echo "6. Integration with existing Alpine.js component\n";
@@ -136,7 +136,7 @@ echo "\nTo test the implementation:\n";
 echo "1. Open the analysis chart page in a browser\n";
 echo "2. Check browser console for performance metrics\n";
 echo "3. Monitor memory usage and render frequency\n";
-echo "4. Test SSE connection stability\n";
+echo "4. Test WebSocket connection stability\n";
 echo "5. Verify throttling is working (should see 100ms intervals)\n";
 
 echo "\nExpected improvements:\n";
@@ -144,6 +144,6 @@ echo "- CPU usage should drop from 100% to <50%\n";
 echo "- Browser should not crash with high-frequency data\n";
 echo "- Chart updates should be smoother\n";
 echo "- Memory usage should remain stable\n";
-echo "- SSE connections should automatically reconnect\n";
+echo "- WebSocket connections should automatically reconnect\n";
 
 echo "\n=== Test Complete ===\n";

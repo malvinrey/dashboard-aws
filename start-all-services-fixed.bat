@@ -13,7 +13,7 @@ echo Stopping existing services...
 taskkill /f /im php.exe >nul 2>&1
 taskkill /f /im nginx.exe >nul 2>&1
 taskkill /f /im redis-server.exe >nul 2>&1
-taskkill /f /im soketi.exe >nul 2>&1
+taskkill /f /im node.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 REM 1. Start Redis Server
@@ -49,15 +49,15 @@ echo 4. Starting Laravel Queue Worker...
 start "Laravel Queue" /min php.exe artisan queue:work --sleep=3 --tries=3 --max-time=3600
 timeout /t 3 /nobreak >nul
 
-REM 5. Start Soketi WebSocket Server
+REM 5. Start Soketi WebSocket Server using local executable
 echo.
 echo 5. Starting Soketi WebSocket Server...
-if exist "soketi.exe" (
-    start "Soketi" /min soketi.exe start --config=soketi.json
+if exist "node_modules\.bin\soketi.cmd" (
+    start "Soketi" /min node_modules\.bin\soketi.cmd start --config=soketi.json
     timeout /t 3 /nobreak >nul
 ) else (
-    echo Warning: soketi.exe not found in current directory
-    echo Please ensure Soketi is installed and accessible
+    echo Warning: soketi not found in node_modules\.bin
+    echo Please run: npm install @soketi/soketi
 )
 
 REM 6. Start Laravel Development Server
@@ -138,7 +138,7 @@ echo Stopping all services...
 taskkill /f /im php.exe >nul 2>&1
 taskkill /f /im nginx.exe >nul 2>&1
 taskkill /f /im redis-server.exe >nul 2>&1
-taskkill /f /im soketi.exe >nul 2>&1
+taskkill /f /im node.exe >nul 2>&1
 
 echo All services stopped
 echo.

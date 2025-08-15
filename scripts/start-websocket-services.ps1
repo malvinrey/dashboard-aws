@@ -80,14 +80,18 @@ if (-not (Test-Port 6379)) {
     Write-Host "✅ Redis is already running on port 6379" -ForegroundColor Green
 }
 
-# Check if Soketi is installed
-try {
-    $soketiVersion = soketi --version
-    Write-Host "✅ Soketi found: $soketiVersion" -ForegroundColor Green
-} catch {
-    Write-Host "❌ Soketi not found. Installing..." -ForegroundColor Red
-    npm install -g @soketi/soketi
+# Check if Soketi is available locally
+$soketiPath = ".\node_modules\.bin\soketi"
+if (-not (Test-Path $soketiPath)) {
+    Write-Host "❌ Soketi not found in node_modules. Installing..." -ForegroundColor Red
+    npm install @soketi/soketi
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Failed to install Soketi" -ForegroundColor Red
+        exit 1
+    }
 }
+
+Write-Host "✅ Soketi found at: $soketiPath" -ForegroundColor Green
 
 # Check if Laravel is ready
 if (-not (Test-Path "artisan")) {
@@ -117,7 +121,7 @@ if (-not (Test-Path "database/migrations/*_create_jobs_table.php")) {
     exit 1
 }
 
-# Start Soketi WebSocket server
+# Start Soketi WebSocket server using local executable
 Write-Host "Starting Soketi WebSocket server..." -ForegroundColor Yellow
 if (Test-Port 6001) {
     Write-Host "⚠️  Port 6001 is already in use. Stopping existing process..." -ForegroundColor Yellow
@@ -125,7 +129,7 @@ if (Test-Port 6001) {
     Start-Sleep -Seconds 2
 }
 
-Start-Service -Name "Soketi WebSocket Server" -Command "soketi start --config=soketi.json"
+Start-Service -Name "Soketi WebSocket Server" -Command "& '$soketiPath' start --config=soketi.json"
 
 # Wait for Soketi to start
 Write-Host "Waiting for Soketi to start..." -ForegroundColor Yellow
@@ -165,7 +169,7 @@ Write-Host "🔧 Management Commands:" -ForegroundColor Cyan
 Write-Host "  • Monitor Redis: redis-cli monitor" -ForegroundColor White
 Write-Host "  • View queue status: php artisan queue:monitor" -ForegroundColor White
 Write-Host "  • Check failed jobs: php artisan queue:failed" -ForegroundColor White
-Write-Host "  • Monitor WebSocket: soketi status" -ForegroundColor White
+Write-Host "  • Monitor WebSocket: & '$soketiPath' status" -ForegroundColor White
 Write-Host ""
 Write-Host "⚡ Performance Features:" -ForegroundColor Cyan
 Write-Host "  • Redis Queue: Ultra-fast job processing" -ForegroundColor White

@@ -3,771 +3,343 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>WebSocket Client Test</title>
+        <title>WebSocket Test - SCADA Dashboard</title>
         <style>
             body {
-                font-family: Arial, sans-serif;
-                max-width: 1000px;
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                max-width: 800px;
                 margin: 0 auto;
                 padding: 20px;
                 background-color: #f5f5f5;
             }
             .container {
                 background: white;
-                padding: 20px;
-                border-radius: 8px;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                margin-bottom: 20px;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            }
+            h1 {
+                color: #2c3e50;
+                text-align: center;
+                margin-bottom: 30px;
             }
             .status {
-                padding: 10px;
-                margin: 10px 0;
-                border-radius: 4px;
+                padding: 15px;
+                margin: 15px 0;
+                border-radius: 5px;
                 font-weight: bold;
             }
-            .status.success {
+            .status.connected {
                 background-color: #d4edda;
                 color: #155724;
+                border: 1px solid #c3e6cb;
             }
-            .status.error {
+            .status.disconnected {
                 background-color: #f8d7da;
                 color: #721c24;
+                border: 1px solid #f5c6cb;
             }
-            .status.warning {
+            .status.connecting {
                 background-color: #fff3cd;
                 color: #856404;
+                border: 1px solid #ffeaa7;
             }
-            .status.info {
-                background-color: #d1ecf1;
-                color: #0c5460;
+            .button {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                margin: 10px 5px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 16px;
+            }
+            .button:hover {
+                background-color: #0056b3;
+            }
+            .button:disabled {
+                background-color: #6c757d;
+                cursor: not-allowed;
             }
             .log {
                 background-color: #f8f9fa;
                 border: 1px solid #dee2e6;
-                border-radius: 4px;
+                border-radius: 5px;
                 padding: 15px;
-                margin: 10px 0;
+                margin: 20px 0;
                 max-height: 300px;
                 overflow-y: auto;
-                font-family: monospace;
-                font-size: 12px;
+                font-family: "Courier New", monospace;
+                font-size: 14px;
             }
-            button {
-                background-color: #007bff;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 4px;
-                cursor: pointer;
-                margin: 5px;
+            .log-entry {
+                margin: 5px 0;
+                padding: 5px;
+                border-radius: 3px;
             }
-            button:hover {
-                background-color: #0056b3;
+            .log-entry.info {
+                background-color: #e3f2fd;
             }
-            button:disabled {
-                background-color: #6c757d;
-                cursor: not-allowed;
+            .log-entry.success {
+                background-color: #e8f5e8;
+            }
+            .log-entry.error {
+                background-color: #ffebee;
+            }
+            .log-entry.warning {
+                background-color: #fff8e1;
             }
             .test-section {
+                margin: 30px 0;
+                padding: 20px;
                 border: 1px solid #dee2e6;
-                border-radius: 4px;
-                padding: 15px;
-                margin: 10px 0;
+                border-radius: 5px;
             }
             .test-section h3 {
                 margin-top: 0;
                 color: #495057;
             }
-            .code-block {
-                background-color: #f8f9fa;
-                border: 1px solid #e9ecef;
-                border-radius: 4px;
-                padding: 10px;
-                font-family: monospace;
-                font-size: 12px;
-                margin: 10px 0;
-            }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>WebSocket Client Test</h1>
-            <p>
-                Testing the WebSocket client implementation without requiring a
-                WebSocket server
-            </p>
+            <h1>🔌 WebSocket Connection Test</h1>
 
-            <div id="status" class="status info">Initializing...</div>
-        </div>
-
-        <div class="container">
-            <h2>Test Sections</h2>
-
-            <div class="test-section">
-                <h3>1. Class Availability Test</h3>
-                <button onclick="testClassAvailability()">
-                    Test Class Availability
-                </button>
-                <div id="classTestResult" class="log"></div>
+            <div class="status disconnected" id="connectionStatus">
+                ❌ Disconnected
             </div>
 
-            <div class="test-section">
-                <h3>2. WebSocket Manager Test</h3>
-                <button onclick="testWebSocketManager()">
-                    Test WebSocket Manager
-                </button>
-                <div id="managerTestResult" class="log"></div>
-            </div>
-
-            <div class="test-section">
-                <h3>3. Chart Component Test</h3>
-                <button onclick="testChartComponent()">
-                    Test Chart Component
-                </button>
-                <div id="chartTestResult" class="log"></div>
-            </div>
-
-            <div class="test-section">
-                <h3>4. Performance Test</h3>
-                <button onclick="testPerformance()">
-                    Test Performance Components
-                </button>
-                <div id="performanceTestResult" class="log"></div>
-            </div>
-
-            <div class="test-section">
-                <h3>5. Integration Test</h3>
-                <button onclick="testIntegration()">
-                    Test Full Integration
-                </button>
-                <div id="integrationTestResult" class="log"></div>
-            </div>
-
-            <div class="test-section">
-                <h3>6. Run All Tests</h3>
+            <div style="text-align: center; margin: 20px 0">
                 <button
-                    onclick="runAllTests()"
-                    style="background-color: #28a745"
+                    class="button"
+                    id="connectBtn"
+                    onclick="connectWebSocket()"
                 >
-                    🚀 Run All Tests
+                    🔗 Connect to WebSocket
                 </button>
-                <div id="allTestsResult" class="log"></div>
+                <button
+                    class="button"
+                    id="disconnectBtn"
+                    onclick="disconnectWebSocket()"
+                    disabled
+                >
+                    🔌 Disconnect
+                </button>
+                <button
+                    class="button"
+                    id="testBtn"
+                    onclick="testConnection()"
+                    disabled
+                >
+                    🧪 Test Connection
+                </button>
+            </div>
+
+            <div class="test-section">
+                <h3>📡 WebSocket Server Status</h3>
+                <p>
+                    <strong>Server URL:</strong>
+                    <code>ws://127.0.0.1:6001</code>
+                </p>
+                <p><strong>Configuration:</strong> <code>soketi.json</code></p>
+                <div id="serverInfo">
+                    <p>Click "Connect to WebSocket" to test the connection.</p>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h3>📊 Connection Log</h3>
+                <div class="log" id="logContainer">
+                    <div class="log-entry info">
+                        Ready to test WebSocket connection...
+                    </div>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h3>🔧 Troubleshooting</h3>
+                <ul>
+                    <li>
+                        <strong>Port 6001 not accessible:</strong> Make sure
+                        Soketi server is running
+                    </li>
+                    <li>
+                        <strong>Connection refused:</strong> Check if
+                        <code>start-websocket-services.bat</code> was executed
+                    </li>
+                    <li>
+                        <strong>WebSocket handshake failed:</strong> Verify
+                        <code>soketi.json</code> configuration
+                    </li>
+                </ul>
             </div>
         </div>
 
-        <div class="container">
-            <h2>Test Results Summary</h2>
-            <div id="summary" class="log"></div>
-        </div>
-
-        <script src="js/scada-websocket-client.js"></script>
-        <script src="js/analysis-chart-component.js"></script>
         <script>
-            let testResults = {
-                classAvailability: false,
-                webSocketManager: false,
-                chartComponent: false,
-                performance: false,
-                integration: false,
-            };
+            let ws = null;
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 5;
+            const reconnectDelay = 2000;
 
-            function log(message, targetId, type = "info") {
-                const target = document.getElementById(targetId);
-                if (target) {
-                    const timestamp = new Date().toLocaleTimeString();
-                    const logEntry = document.createElement("div");
-                    logEntry.innerHTML = `<span style="color: #666;">[${timestamp}]</span> ${message}`;
-                    target.appendChild(logEntry);
-                    target.scrollTop = target.scrollTop + 1000;
-                }
-                console.log(message);
+            function log(message, type = "info") {
+                const logContainer = document.getElementById("logContainer");
+                const logEntry = document.createElement("div");
+                logEntry.className = `log-entry ${type}`;
+                logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                logContainer.appendChild(logEntry);
+                logContainer.scrollTop = logContainer.scrollHeight;
             }
 
-            function updateSummary() {
-                const summary = document.getElementById("summary");
-                const passed =
-                    Object.values(testResults).filter(Boolean).length;
-                const total = Object.keys(testResults).length;
-
-                summary.innerHTML = `
-                <h3>Test Summary: ${passed}/${total} Tests Passed</h3>
-                <div>✅ Class Availability: ${
-                    testResults.classAvailability ? "PASS" : "FAIL"
-                }</div>
-                <div>✅ WebSocket Manager: ${
-                    testResults.webSocketManager ? "PASS" : "FAIL"
-                }</div>
-                <div>✅ Chart Component: ${
-                    testResults.chartComponent ? "PASS" : "FAIL"
-                }</div>
-                <div>✅ Performance: ${
-                    testResults.performance ? "PASS" : "FAIL"
-                }</div>
-                <div>✅ Integration: ${
-                    testResults.integration ? "PASS" : "FAIL"
-                }</div>
-            `;
+            function updateStatus(status, message) {
+                const statusElement =
+                    document.getElementById("connectionStatus");
+                statusElement.className = `status ${status}`;
+                statusElement.innerHTML = message;
             }
 
-            function testClassAvailability() {
-                const targetId = "classTestResult";
-                log("=== Testing Class Availability ===", targetId);
+            function updateButtons(connected) {
+                document.getElementById("connectBtn").disabled = connected;
+                document.getElementById("disconnectBtn").disabled = !connected;
+                document.getElementById("testBtn").disabled = !connected;
+            }
 
-                try {
-                    // Test ScadaWebSocketClient
-                    if (typeof ScadaWebSocketClient === "undefined") {
-                        log(
-                            "❌ ScadaWebSocketClient is not defined",
-                            targetId,
-                            "error"
-                        );
-                        return;
-                    }
-                    log(
-                        "✅ ScadaWebSocketClient class is available",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test ScadaEchoClient
-                    if (typeof ScadaEchoClient === "undefined") {
-                        log(
-                            "❌ ScadaEchoClient is not defined",
-                            targetId,
-                            "error"
-                        );
-                        return;
-                    }
-                    log(
-                        "✅ ScadaEchoClient class is available",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test WebSocketManager
-                    if (typeof WebSocketManager === "undefined") {
-                        log(
-                            "❌ WebSocketManager class is not defined",
-                            targetId,
-                            "error"
-                        );
-                        return;
-                    }
-                    log(
-                        "✅ WebSocketManager class is available",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test ChartThrottler
-                    if (typeof ChartThrottler === "undefined") {
-                        log(
-                            "❌ ChartThrottler class is not defined",
-                            targetId,
-                            "error"
-                        );
-                        return;
-                    }
-                    log(
-                        "✅ ChartThrottler class is available",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test DataBuffer
-                    if (typeof DataBuffer === "undefined") {
-                        log(
-                            "❌ DataBuffer class is not defined",
-                            targetId,
-                            "error"
-                        );
-                        return;
-                    }
-                    log(
-                        "✅ DataBuffer class is available",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test ChartDataManager
-                    if (typeof ChartDataManager === "undefined") {
-                        log(
-                            "❌ ChartDataManager class is not defined",
-                            targetId,
-                            "error"
-                        );
-                        return;
-                    }
-                    log(
-                        "✅ ChartDataManager class is available",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test PerformanceTracker
-                    if (typeof PerformanceTracker === "undefined") {
-                        log(
-                            "❌ PerformanceTracker class is not defined",
-                            targetId,
-                            "error"
-                        );
-                        return;
-                    }
-                    log(
-                        "✅ PerformanceTracker class is available",
-                        targetId,
-                        "success"
-                    );
-
-                    testResults.classAvailability = true;
-                    log(
-                        "✅ All required classes are available",
-                        targetId,
-                        "success"
-                    );
-                } catch (e) {
-                    log(
-                        `❌ Class availability test failed: ${e.message}`,
-                        targetId,
-                        "error"
-                    );
+            function connectWebSocket() {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    log("WebSocket is already connected", "warning");
+                    return;
                 }
 
-                updateSummary();
-            }
-
-            function testWebSocketManager() {
-                const targetId = "managerTestResult";
-                log("=== Testing WebSocket Manager ===", targetId);
+                log("Attempting to connect to WebSocket server...", "info");
+                updateStatus("connecting", "🔄 Connecting...");
+                updateButtons(false);
 
                 try {
-                    // Create WebSocket Manager instance
-                    const manager = new WebSocketManager({
-                        host: "127.0.0.1",
-                        port: 6001,
-                        appKey: "scada_dashboard_key_2024",
-                        onMessage: (data) =>
-                            log(
-                                "📨 Message received: " + JSON.stringify(data),
-                                targetId
-                            ),
-                        onConnect: () => log("🔗 Connected", targetId),
-                        onError: (error) => log("❌ Error: " + error, targetId),
-                        onDisconnect: () => log("🔌 Disconnected", targetId),
-                    });
+                    ws = new WebSocket("ws://127.0.0.1:6001");
 
-                    log(
-                        "✅ WebSocket Manager instance created",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test methods
-                    if (typeof manager.connect === "function") {
+                    ws.onopen = function (event) {
                         log(
-                            "✅ connect() method available",
-                            targetId,
+                            "✅ WebSocket connection established successfully!",
                             "success"
                         );
-                    } else {
-                        log("❌ connect() method missing", targetId, "error");
-                    }
-
-                    if (typeof manager.subscribe === "function") {
-                        log(
-                            "✅ subscribe() method available",
-                            targetId,
-                            "success"
+                        updateStatus(
+                            "connected",
+                            "✅ Connected to WebSocket Server"
                         );
-                    } else {
-                        log("❌ subscribe() method missing", targetId, "error");
-                    }
+                        updateButtons(true);
+                        reconnectAttempts = 0;
 
-                    if (typeof manager.disconnect === "function") {
-                        log(
-                            "✅ disconnect() method available",
-                            targetId,
-                            "success"
+                        // Send a test message
+                        ws.send(
+                            JSON.stringify({
+                                type: "test",
+                                message: "Hello from WebSocket test client!",
+                                timestamp: new Date().toISOString(),
+                            })
                         );
-                    } else {
-                        log(
-                            "❌ disconnect() method missing",
-                            targetId,
-                            "error"
-                        );
-                    }
-
-                    if (typeof manager.getConnectionState === "function") {
-                        log(
-                            "✅ getConnectionState() method available",
-                            targetId,
-                            "success"
-                        );
-                    } else {
-                        log(
-                            "❌ getConnectionState() method missing",
-                            targetId,
-                            "error"
-                        );
-                    }
-
-                    // Test connection state
-                    const state = manager.getConnectionState();
-                    log(`📊 Connection state: ${state}`, targetId);
-
-                    // Cleanup
-                    manager.disconnect();
-                    log(
-                        "✅ WebSocket Manager test completed",
-                        targetId,
-                        "success"
-                    );
-
-                    testResults.webSocketManager = true;
-                } catch (e) {
-                    log(
-                        `❌ WebSocket Manager test failed: ${e.message}`,
-                        targetId,
-                        "error"
-                    );
-                }
-
-                updateSummary();
-            }
-
-            function testChartComponent() {
-                const targetId = "chartTestResult";
-                log("=== Testing Chart Component ===", targetId);
-
-                try {
-                    // Test if Alpine.js is available
-                    if (typeof Alpine === "undefined") {
-                        log(
-                            "⚠️ Alpine.js not available, testing component structure only",
-                            targetId,
-                            "warning"
-                        );
-                    } else {
-                        log("✅ Alpine.js is available", targetId, "success");
-                    }
-
-                    // Test component data structure
-                    const componentData = {
-                        plotlyChart: null,
-                        websocketManager: null,
-                        chartThrottler: null,
-                        dataBuffer: null,
-                        chartDataManager: null,
-                        performanceTracker: null,
-                        chartConfig: {},
-                        dataConfig: {},
-                        state: {},
                     };
 
-                    log(
-                        "✅ Component data structure defined",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test if methods would work
-                    const testMethods = [
-                        "initComponent",
-                        "initImmediateFixes",
-                        "handleWebSocketMessage",
-                        "aggregateData",
-                        "updateChartWithThrottledData",
-                        "setupEventListeners",
-                        "initPlotlyChart",
-                        "startWebSocketConnection",
-                        "populateChartWithInitialData",
-                    ];
-
-                    testMethods.forEach((method) => {
-                        log(
-                            `✅ Method ${method}() would be available`,
-                            targetId,
-                            "success"
-                        );
-                    });
-
-                    log(
-                        "✅ Chart Component test completed",
-                        targetId,
-                        "success"
-                    );
-
-                    testResults.chartComponent = true;
-                } catch (e) {
-                    log(
-                        `❌ Chart Component test failed: ${e.message}`,
-                        targetId,
-                        "error"
-                    );
-                }
-
-                updateSummary();
-            }
-
-            function testPerformance() {
-                const targetId = "performanceTestResult";
-                log("=== Testing Performance Components ===", targetId);
-
-                try {
-                    // Test ChartThrottler
-                    const throttler = new ChartThrottler(100);
-                    log(
-                        "✅ ChartThrottler instance created",
-                        targetId,
-                        "success"
-                    );
-
-                    if (typeof throttler.throttleUpdate === "function") {
-                        log(
-                            "✅ throttleUpdate() method available",
-                            targetId,
-                            "success"
-                        );
-                    }
-
-                    // Test DataBuffer
-                    const buffer = new DataBuffer(50, 1000);
-                    log("✅ DataBuffer instance created", targetId, "success");
-
-                    if (typeof buffer.addData === "function") {
-                        log(
-                            "✅ addData() method available",
-                            targetId,
-                            "success"
-                        );
-                    }
-
-                    if (typeof buffer.setFlushCallback === "function") {
-                        log(
-                            "✅ setFlushCallback() method available",
-                            targetId,
-                            "success"
-                        );
-                    }
-
-                    // Test ChartDataManager
-                    const dataManager = new ChartDataManager(1000, 30000);
-                    log(
-                        "✅ ChartDataManager instance created",
-                        targetId,
-                        "success"
-                    );
-
-                    if (typeof dataManager.addData === "function") {
-                        log(
-                            "✅ addData() method available",
-                            targetId,
-                            "success"
-                        );
-                    }
-
-                    // Test PerformanceTracker
-                    const tracker = new PerformanceTracker();
-                    log(
-                        "✅ PerformanceTracker instance created",
-                        targetId,
-                        "success"
-                    );
-
-                    if (typeof tracker.recordRender === "function") {
-                        log(
-                            "✅ recordRender() method available",
-                            targetId,
-                            "success"
-                        );
-                    }
-
-                    if (typeof tracker.recordDataReceived === "function") {
-                        log(
-                            "✅ recordDataReceived() method available",
-                            targetId,
-                            "success"
-                        );
-                    }
-
-                    // Cleanup
-                    dataManager.stopCleanupTimer();
-                    clearInterval(tracker.monitoringInterval);
-
-                    log(
-                        "✅ Performance Components test completed",
-                        targetId,
-                        "success"
-                    );
-
-                    testResults.performance = true;
-                } catch (e) {
-                    log(
-                        `❌ Performance Components test failed: ${e.message}`,
-                        targetId,
-                        "error"
-                    );
-                }
-
-                updateSummary();
-            }
-
-            function testIntegration() {
-                const targetId = "integrationTestResult";
-                log("=== Testing Full Integration ===", targetId);
-
-                try {
-                    // Test WebSocket client creation
-                    const wsClient = new ScadaWebSocketClient({
-                        url: "ws://127.0.0.1:6001/app/test",
-                        onConnect: () =>
-                            log("🔗 WebSocket client connected", targetId),
-                        onError: (error) =>
+                    ws.onmessage = function (event) {
+                        try {
+                            const data = JSON.parse(event.data);
                             log(
-                                "❌ WebSocket client error: " + error,
-                                targetId
-                            ),
-                        onDisconnect: () =>
-                            log("🔌 WebSocket client disconnected", targetId),
-                    });
+                                `📨 Received: ${JSON.stringify(data, null, 2)}`,
+                                "success"
+                            );
+                        } catch (e) {
+                            log(`📨 Received raw data: ${event.data}`, "info");
+                        }
+                    };
 
-                    log("✅ WebSocket client created", targetId, "success");
-
-                    // Test Echo compatibility
-                    const echoClient = new ScadaEchoClient({
-                        host: "127.0.0.1",
-                        port: 6001,
-                        appKey: "test_key",
-                        onConnect: () =>
-                            log("🔗 Echo client connected", targetId),
-                        onError: (error) =>
-                            log("❌ Echo client error: " + error, targetId),
-                    });
-
-                    log(
-                        "✅ Echo compatibility client created",
-                        targetId,
-                        "success"
-                    );
-
-                    // Test if window.Echo exists
-                    if (typeof window.Echo !== "undefined") {
+                    ws.onclose = function (event) {
                         log(
-                            "✅ Window.Echo created successfully",
-                            targetId,
-                            "success"
+                            `🔌 WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`,
+                            "warning"
                         );
+                        updateStatus("disconnected", "❌ Disconnected");
+                        updateButtons(false);
 
-                        if (typeof window.Echo.socketId === "function") {
-                            try {
-                                const socketId = window.Echo.socketId();
-                                log(
-                                    `✅ Echo.socketId() works: ${socketId}`,
-                                    targetId,
-                                    "success"
-                                );
-                            } catch (e) {
-                                log(
-                                    `❌ Echo.socketId() failed: ${e.message}`,
-                                    targetId,
-                                    "error"
-                                );
-                            }
+                        // Attempt to reconnect
+                        if (reconnectAttempts < maxReconnectAttempts) {
+                            reconnectAttempts++;
+                            log(
+                                `🔄 Attempting to reconnect... (${reconnectAttempts}/${maxReconnectAttempts})`,
+                                "info"
+                            );
+                            setTimeout(connectWebSocket, reconnectDelay);
                         } else {
                             log(
-                                "❌ Echo.socketId is not a function",
-                                targetId,
+                                "❌ Max reconnection attempts reached. Please check server status.",
                                 "error"
                             );
                         }
-                    } else {
-                        log("❌ Window.Echo not created", targetId, "error");
-                    }
+                    };
 
-                    // Test WebSocket Manager integration
-                    const manager = new WebSocketManager({
-                        host: "127.0.0.1",
-                        port: 6001,
-                        appKey: "test_key",
-                        onMessage: (data) =>
-                            log(
-                                "📨 Manager message: " + JSON.stringify(data),
-                                targetId
-                            ),
-                        onConnect: () => log("🔗 Manager connected", targetId),
-                        onError: (error) =>
-                            log("❌ Manager error: " + error, targetId),
-                        onDisconnect: () =>
-                            log("🔌 Manager disconnected", targetId),
-                    });
-
+                    ws.onerror = function (error) {
+                        log(
+                            `❌ WebSocket error: ${
+                                error.message || "Unknown error"
+                            }`,
+                            "error"
+                        );
+                        updateStatus("disconnected", "❌ Connection Error");
+                        updateButtons(false);
+                    };
+                } catch (error) {
                     log(
-                        "✅ WebSocket Manager integration test completed",
-                        targetId,
-                        "success"
-                    );
-
-                    // Cleanup
-                    wsClient.disconnect();
-                    echoClient.disconnect();
-                    manager.disconnect();
-
-                    log(
-                        "✅ Full Integration test completed",
-                        targetId,
-                        "success"
-                    );
-
-                    testResults.integration = true;
-                } catch (e) {
-                    log(
-                        `❌ Full Integration test failed: ${e.message}`,
-                        targetId,
+                        `❌ Failed to create WebSocket connection: ${error.message}`,
                         "error"
                     );
+                    updateStatus("disconnected", "❌ Connection Failed");
+                    updateButtons(false);
                 }
-
-                updateSummary();
             }
 
-            function runAllTests() {
-                const allTestsResult =
-                    document.getElementById("allTestsResult");
-                log("=== Running All Tests ===", allTestsResult.id);
-
-                try {
-                    testClassAvailability();
-                    testWebSocketManager();
-                    testChartComponent();
-                    testPerformance();
-                    testIntegration();
-                    log(
-                        "✅ All tests completed successfully!",
-                        allTestsResult.id,
-                        "success"
-                    );
-                } catch (e) {
-                    log(
-                        `❌ Error running all tests: ${e.message}`,
-                        allTestsResult.id,
-                        "error"
-                    );
+            function disconnectWebSocket() {
+                if (ws) {
+                    log("🔌 Manually disconnecting WebSocket...", "info");
+                    ws.close(1000, "Manual disconnect");
+                    ws = null;
+                    updateStatus("disconnected", "❌ Disconnected");
+                    updateButtons(false);
                 }
-                updateSummary();
             }
 
-            // Initialize when page loads
-            document.addEventListener("DOMContentLoaded", function () {
-                const statusElement = document.getElementById("status");
-                statusElement.textContent = "Ready for testing";
-                statusElement.className = "status success";
+            function testConnection() {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    log("❌ WebSocket is not connected", "error");
+                    return;
+                }
 
-                console.log("WebSocket Client Test page loaded");
+                log("🧪 Testing WebSocket connection...", "info");
 
-                // Auto-run basic tests
-                setTimeout(() => {
-                    testClassAvailability();
-                }, 1000);
+                // Send test message
+                const testMessage = {
+                    type: "ping",
+                    message: "Connection test",
+                    timestamp: new Date().toISOString(),
+                };
+
+                ws.send(JSON.stringify(testMessage));
+                log(
+                    `📤 Sent test message: ${JSON.stringify(testMessage)}`,
+                    "info"
+                );
+            }
+
+            // Check if WebSocket is supported
+            if (!window.WebSocket) {
+                log("❌ WebSocket is not supported in this browser", "error");
+                updateStatus("disconnected", "❌ WebSocket Not Supported");
+            } else {
+                log("✅ WebSocket is supported in this browser", "success");
+            }
+
+            // Auto-connect after page load
+            window.addEventListener("load", function () {
+                log(
+                    "🚀 Page loaded, ready to test WebSocket connection",
+                    "info"
+                );
             });
         </script>
     </body>

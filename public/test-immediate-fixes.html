@@ -275,12 +275,12 @@
                         '<div class="status error">✗ DataBuffer class not available</div>';
                 }
 
-                if (typeof SSEManager !== "undefined") {
+                if (typeof ScadaWebSocketClient !== "undefined") {
                     status +=
-                        '<div class="status success">✓ SSEManager class available</div>';
+                        '<div class="status success">✓ WebSocket Client class available</div>';
                 } else {
                     status +=
-                        '<div class="status error">✗ SSEManager class not available</div>';
+                        '<div class="status error">✗ WebSocket Client class not available</div>';
                 }
 
                 if (typeof ChartDataManager !== "undefined") {

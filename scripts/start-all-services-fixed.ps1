@@ -64,7 +64,7 @@ function Test-PortListening {
 
 # Stop any existing services first
 Write-Host "Stopping existing services..." -ForegroundColor Yellow
-Get-Process -Name "php", "nginx", "redis-server", "soketi" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "php", "nginx", "redis-server", "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
 # 1. Start Redis Server
@@ -101,59 +101,42 @@ while (-not $redisReady -and $attempts -lt 30) {
     }
 }
 
-if (-not $redisReady) {
-    Write-Host "Warning: Redis may not be fully ready" -ForegroundColor Yellow
-}
-
 # 2. Start PHP-FPM
 Write-Host "`n2. Starting PHP-FPM..." -ForegroundColor Cyan
-$phpStarted = Start-ServiceAndWait "php-cgi" "php-cgi -b 127.0.0.1:9000"
-if (-not $phpStarted) {
+$phpFpmStarted = Start-ServiceAndWait "php-cgi" "php-cgi -b 127.0.0.1:9000"
+if (-not $phpFpmStarted) {
     Write-Host "Warning: PHP-FPM may not have started properly" -ForegroundColor Yellow
 }
 
 # 3. Start Nginx
 Write-Host "`n3. Starting Nginx..." -ForegroundColor Cyan
-$nginxStarted = Start-ServiceAndWait "nginx" "nginx\nginx.exe -c nginx\config\nginx.conf"
-if (-not $nginxStarted) {
-    Write-Host "Warning: Nginx may not have started properly" -ForegroundColor Yellow
-}
-
-# Wait for Nginx to be ready
-Write-Host "Waiting for Nginx to be ready..." -ForegroundColor Yellow
-$nginxReady = $false
-$attempts = 0
-while (-not $nginxReady -and $attempts -lt 30) {
-    try {
-        $nginxTest = Test-NetConnection -ComputerName "127.0.0.1" -Port 80 -InformationLevel Quiet -WarningAction SilentlyContinue
-        if ($nginxTest.TcpTestSucceeded) {
-            $nginxReady = $true
-            Write-Host "Nginx is ready on port 80" -ForegroundColor Green
-        }
+if (Test-Path "nginx\nginx.exe") {
+    $nginxStarted = Start-ServiceAndWait "nginx" "nginx\nginx.exe -c nginx\config\nginx.conf"
+    if (-not $nginxStarted) {
+        Write-Host "Warning: Nginx may not have started properly" -ForegroundColor Yellow
     }
-    catch {
-        # Ignore errors
-    }
-
-    if (-not $nginxReady) {
-        Start-Sleep -Seconds 1
-        $attempts++
-        Write-Host "Waiting for Nginx... ($attempts/30)" -ForegroundColor Yellow
-    }
+} else {
+    Write-Host "Warning: nginx\nginx.exe not found" -ForegroundColor Yellow
 }
 
 # 4. Start Laravel Queue Worker
 Write-Host "`n4. Starting Laravel Queue Worker..." -ForegroundColor Cyan
 $queueStarted = Start-ServiceAndWait "php" "php artisan queue:work --sleep=3 --tries=3 --max-time=3600"
 if (-not $queueStarted) {
-    Write-Host "Warning: Queue worker may not have started properly" -ForegroundColor Yellow
+    Write-Host "Warning: Laravel Queue Worker may not have started properly" -ForegroundColor Yellow
 }
 
-# 5. Start Soketi WebSocket Server
+# 5. Start Soketi WebSocket Server using local executable
 Write-Host "`n5. Starting Soketi WebSocket Server..." -ForegroundColor Cyan
-$soketiStarted = Start-ServiceAndWait "soketi" "soketi start --config=soketi.json"
-if (-not $soketiStarted) {
-    Write-Host "Warning: Soketi may not have started properly" -ForegroundColor Yellow
+$soketiPath = ".\node_modules\.bin\soketi.cmd"
+if (Test-Path $soketiPath) {
+    $soketiStarted = Start-ServiceAndWait "node" "& '$soketiPath' start --config=soketi.json"
+    if (-not $soketiStarted) {
+        Write-Host "Warning: Soketi may not have started properly" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "Warning: soketi not found in node_modules\.bin" -ForegroundColor Yellow
+    Write-Host "Please run: npm install @soketi/soketi" -ForegroundColor Yellow
 }
 
 # Wait for Soketi to be ready
@@ -219,7 +202,7 @@ $services = @(
     @{Name="PHP-FPM"; Port=9000; Process="php-cgi"},
     @{Name="Nginx"; Port=80; Process="nginx"},
     @{Name="Laravel Queue"; Port=0; Process="php"},
-    @{Name="Soketi"; Port=6001; Process="soketi"},
+    @{Name="Soketi"; Port=6001; Process="node"},
     @{Name="Laravel Server"; Port=8000; Process="php"}
 )
 
@@ -249,29 +232,32 @@ Write-Host "`nPress Ctrl+C to stop all services" -ForegroundColor Cyan
 # Keep script running and monitor services
 try {
     while ($true) {
-        Start-Sleep -Seconds 30
+        Start-Sleep -Seconds 10
 
-        # Check if any critical services stopped
-        $criticalServices = @("nginx", "php-cgi", "redis-server")
-        $stoppedServices = @()
+        # Check service status
+        $redisRunning = Test-PortListening 6379
+        $soketiRunning = Test-PortListening 6001
+        $laravelRunning = Test-PortListening 8000
 
-        foreach ($service in $criticalServices) {
-            if (-not (Test-ProcessRunning $service)) {
-                $stoppedServices += $service
-            }
+        if (-not $redisRunning) {
+            Write-Host "⚠️  Redis server stopped unexpectedly" -ForegroundColor Yellow
         }
 
-        if ($stoppedServices.Count -gt 0) {
-            Write-Host "Warning: Critical services stopped: $($stoppedServices -join ', ')" -ForegroundColor Red
-            Write-Host "Consider restarting the script" -ForegroundColor Yellow
+        if (-not $soketiRunning) {
+            Write-Host "⚠️  Soketi WebSocket server stopped unexpectedly" -ForegroundColor Yellow
+        }
+
+        if (-not $laravelRunning) {
+            Write-Host "⚠️  Laravel server stopped unexpectedly" -ForegroundColor Yellow
         }
     }
 }
 catch {
-    Write-Host "`nStopping all services..." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "🛑 Stopping all services..." -ForegroundColor Red
 
-    # Stop all services
-    Get-Process -Name "php", "nginx", "redis-server", "soketi" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Stop services
+    Get-Process -Name "php", "nginx", "redis-server", "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-    Write-Host "All services stopped" -ForegroundColor Green
+    Write-Host "✅ All services stopped" -ForegroundColor Green
 }

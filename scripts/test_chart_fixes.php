@@ -18,7 +18,7 @@ if (file_exists($testPage)) {
     $fixes = [
         'ChartThrottler' => 'ChartThrottler class reference',
         'DataBuffer' => 'DataBuffer class reference',
-        'SSEManager' => 'SSEManager class reference',
+        'WebSocket Client' => 'WebSocket client reference',
         'ChartDataManager' => 'ChartDataManager class reference',
         'PerformanceTracker' => 'PerformanceTracker class reference',
         'resetChart()' => 'Chart reset function',
@@ -49,11 +49,11 @@ if (file_exists($jsFile)) {
     $jsFixes = [
         'class ChartThrottler' => 'ChartThrottler class definition',
         'class DataBuffer' => 'DataBuffer class definition',
-        'class SSEManager' => 'SSEManager class definition',
+        'WebSocket' => 'WebSocket implementation',
         'class ChartDataManager' => 'ChartDataManager class definition',
         'class PerformanceTracker' => 'PerformanceTracker class definition',
         'initImmediateFixes()' => 'Initialization method',
-        'handleSSEMessage' => 'SSE message handler',
+        'handleWebSocketMessage' => 'WebSocket message handler',
         'aggregateData' => 'Data aggregation method'
     ];
 

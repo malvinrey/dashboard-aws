@@ -1,20 +1,17 @@
 <?php
 
 /**
- * Test Script untuk Memverifikasi Alpine.js Component
- *
- * Script ini akan memeriksa apakah file JavaScript Alpine.js sudah dibuat dengan benar
- * dan dapat diakses dari browser.
+ * Test Alpine.js Component Implementation
+ * Tests if the Alpine.js component is properly implemented
  */
 
-echo "=== Test Alpine.js Component ===\n\n";
+echo "=== Testing Alpine.js Component ===\n\n";
 
-// 1. Periksa apakah file JavaScript sudah dibuat
+// 1. Periksa apakah file JavaScript Alpine.js ada
 $jsFile = 'public/js/analysis-chart-component.js';
 if (file_exists($jsFile)) {
     echo "✓ File JavaScript Alpine.js ditemukan: $jsFile\n";
 
-    // Periksa ukuran file
     $fileSize = filesize($jsFile);
     echo "  - Ukuran file: " . number_format($fileSize) . " bytes\n";
 
@@ -98,13 +95,13 @@ if (file_exists($layoutFile)) {
 
 echo "\n";
 
-// 4. Periksa apakah file SSE Worker ada
-$sseWorkerFile = 'public/js/sse-worker.js';
-if (file_exists($sseWorkerFile)) {
-    echo "✓ File SSE Worker ditemukan: $sseWorkerFile\n";
+// 4. Periksa apakah file WebSocket Client ada
+$websocketClientFile = 'public/js/scada-websocket-client.js';
+if (file_exists($websocketClientFile)) {
+    echo "✓ File WebSocket Client ditemukan: $websocketClientFile\n";
 } else {
-    echo "⚠ File SSE Worker tidak ditemukan: $sseWorkerFile\n";
-    echo "  - Pastikan file ini ada untuk SSE connection\n";
+    echo "⚠ File WebSocket Client tidak ditemukan: $websocketClientFile\n";
+    echo "  - Pastikan file ini ada untuk WebSocket connection\n";
 }
 
 echo "\n=== Selesai ===\n";
