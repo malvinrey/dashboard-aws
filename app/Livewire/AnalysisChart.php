@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Services\ScadaDataService;
+use App\Events\ScadaDataReceived;
 use Livewire\Component;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Layout;
@@ -30,6 +31,18 @@ class AnalysisChart extends Component
 
     // KUNCI PERBAIKAN: Tambahkan properti ini untuk mengontrol polling
     public bool $realtimeEnabled = true;
+
+    // WebSocket Integration Properties
+    public string $websocketStatus = 'disconnected';
+    public ?string $lastWebSocketUpdate = null;
+    public array $websocketData = [];
+
+    // WebSocket Event Listeners
+    protected $listeners = [
+        'echo:scada-data,scada.data.received' => 'handleWebSocketData',
+        'echo:scada-realtime,scada.data.received' => 'handleRealtimeData',
+        'websocket-status-updated' => 'updateWebSocketStatus'
+    ];
 
     /**
      * Runs once, when the component is first mounted.
@@ -255,6 +268,71 @@ class AnalysisChart extends Component
 
     // HAPUS method 'catchUpMissedData' - SUDAH TIDAK DIPERLUKAN
     // Gap sekarang dibuat langsung di frontend visibilitychange listener
+
+    /**
+     * Handle WebSocket data received from scada-data channel
+     */
+    public function handleWebSocketData($event)
+    {
+        try {
+            $data = $event['data'] ?? [];
+
+            if (!empty($data)) {
+                $this->websocketData[] = $data;
+                $this->lastWebSocketUpdate = now();
+
+                // Limit data points untuk performance
+                if (count($this->websocketData) > 1000) {
+                    $this->websocketData = array_slice($this->websocketData, -1000);
+                }
+
+                // Dispatch event untuk frontend update
+                $this->dispatch('chart-data-updated', $data);
+
+                Log::info('WebSocket data received and processed', [
+                    'data_size' => is_array($data) ? count($data) : 1,
+                    'total_points' => count($this->websocketData),
+                    'timestamp' => now()
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Error handling WebSocket data', [
+                'error' => $e->getMessage(),
+                'event' => $event
+            ]);
+        }
+    }
+
+    /**
+     * Handle real-time specific data from scada-realtime channel
+     */
+    public function handleRealtimeData($event)
+    {
+        // Handle real-time specific data
+        $this->handleWebSocketData($event);
+    }
+
+    /**
+     * Update WebSocket connection status
+     */
+    public function updateWebSocketStatus($status)
+    {
+        $this->websocketStatus = $status;
+        $this->dispatch('websocket-status-updated', $status);
+    }
+
+    /**
+     * Get WebSocket performance metrics
+     */
+    public function getWebSocketMetrics()
+    {
+        return [
+            'status' => $this->websocketStatus,
+            'last_update' => $this->lastWebSocketUpdate,
+            'data_points' => count($this->websocketData),
+            'realtime_enabled' => $this->realtimeEnabled
+        ];
+    }
 
     /**
      * Renders the component's view.

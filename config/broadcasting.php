@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'default' => env('BROADCAST_DRIVER', 'pusher'),
+    'default' => env('BROADCAST_DRIVER', 'redis'),
 
     /*
     |--------------------------------------------------------------------------
@@ -52,6 +52,25 @@ return [
             ],
         ],
 
+        'websockets' => [
+            'driver' => 'pusher',
+            'key' => env('PUSHER_APP_KEY', 'scada_dashboard_key_2024'),
+            'secret' => env('PUSHER_APP_SECRET', 'scada_dashboard_secret_2024'),
+            'app_id' => env('PUSHER_APP_ID', '12345'),
+            'options' => [
+                'cluster' => env('PUSHER_APP_CLUSTER', 'mt1'),
+                'encrypted' => env('PUSHER_APP_ENCRYPTED', false),
+                'host' => env('PUSHER_HOST', '127.0.0.1'),
+                'port' => env('PUSHER_PORT', 6001),
+                'scheme' => env('PUSHER_SCHEME', 'http'),
+                'useTLS' => env('PUSHER_SCHEME', 'http') === 'https',
+                'curl_options' => [
+                    CURLOPT_SSL_VERIFYHOST => 0,
+                    CURLOPT_SSL_VERIFYPEER => 0,
+                ],
+            ],
+        ],
+
         'ably' => [
             'driver' => 'ably',
             'key' => env('ABLY_KEY'),
@@ -60,6 +79,9 @@ return [
         'redis' => [
             'driver' => 'redis',
             'connection' => 'default',
+            'queue' => [
+                'connection' => 'default',
+            ],
             'options' => [
                 'cluster' => env('REDIS_CLUSTER', false),
                 'prefix' => env('REDIS_PREFIX', ''),
