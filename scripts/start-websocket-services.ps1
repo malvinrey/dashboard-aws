@@ -6,7 +6,50 @@ param(
     [switch]$Background
 )
 
+# Global variables for tracking process IDs
+$Global:ServicePIDs = @{}
+$Global:PIDFile = ".\temp\websocket-services.pid"
+
+# =============================================================================
+# Function to load service PIDs from file (THIS IS THE FIX)
+# =============================================================================
+function Load-ServicePIDs {
+    try {
+        if (Test-Path $Global:PIDFile) {
+            $fileContent = Get-Content -Path $Global:PIDFile -Raw
+            if ($fileContent) {
+                $Global:ServicePIDs = $fileContent | ConvertFrom-Json
+                Write-Host "📂 Loaded service PIDs from: $Global:PIDFile" -ForegroundColor Cyan
+                return $true
+            }
+        }
+    } catch {
+        Write-Host "⚠️  Warning: Could not load or parse service PIDs from file. It might be corrupt." -ForegroundColor Yellow
+        # Corrupt file, so we should clean it up to prevent future errors
+        Remove-Item $Global:PIDFile -Force -ErrorAction SilentlyContinue
+    }
+    return $false
+}
+
 Write-Host "🚀 Starting SCADA WebSocket Services..." -ForegroundColor Green
+
+# Check if services are already running and load PIDs
+if (Load-ServicePIDs) {
+    Write-Host "📂 Found existing service PIDs, checking if services are still running..." -ForegroundColor Cyan
+
+    $existingServices = @{}
+    foreach ($service in $Global:ServicePIDs.GetEnumerator()) {
+        if ($service.Value -and (Get-Process -Id $service.Value -ErrorAction SilentlyContinue)) {
+            $existingServices[$service.Key] = $service.Value
+            Write-Host "✅ $($service.Key) already running (PID: $($service.Value))" -ForegroundColor Green
+        } else {
+            Write-Host "⚠️  $($service.Key) process with PID $($service.Value) not found. It may have been stopped." -ForegroundColor Yellow
+        }
+    }
+
+    # Update global PIDs with only running services
+    $Global:ServicePIDs = $existingServices
+}
 
 # Set environment variables
 $env:BROADCAST_DRIVER = "pusher"
@@ -36,6 +79,36 @@ function Test-Port {
     }
 }
 
+# Function to check if Soketi is responding
+function Test-Soketi {
+    try {
+        # First check if port is listening
+        if (-not (Test-Port 6001)) {
+            return $false
+        }
+
+        # Then try a simple HTTP request
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:6001" -TimeoutSec 3 -UseBasicParsing -ErrorAction SilentlyContinue
+        return $response.StatusCode -eq 200
+    }
+    catch {
+        return (Test-Port 6001)
+    }
+}
+
+# Function to save service PIDs to file
+function Save-ServicePIDs {
+    try {
+        if (-not (Test-Path ".\temp")) {
+            New-Item -ItemType Directory -Path ".\temp" -Force | Out-Null
+        }
+        $Global:ServicePIDs | ConvertTo-Json | Out-File -FilePath $Global:PIDFile -Encoding UTF8
+        Write-Host "💾 Service PIDs saved to: $Global:PIDFile" -ForegroundColor Cyan
+    } catch {
+        Write-Host "⚠️  Warning: Could not save service PIDs to file" -ForegroundColor Yellow
+    }
+}
+
 # Function to start service
 function Start-Service {
     param(
@@ -46,11 +119,18 @@ function Start-Service {
 
     Write-Host "Starting $Name..." -ForegroundColor Yellow
 
-    if ($Background) {
-        Start-Process -FilePath "powershell" -ArgumentList "-Command", $Command -WorkingDirectory $WorkingDirectory -WindowStyle Hidden
-        Write-Host "$Name started in background" -ForegroundColor Green
-    } else {
-        Start-Process -FilePath "powershell" -ArgumentList "-Command", $Command -WorkingDirectory $WorkingDirectory
+    try {
+        $process = Start-Process -FilePath "powershell" -ArgumentList "-Command", $Command -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru
+        if ($process) {
+            Write-Host "$Name started successfully (PID: $($process.Id))" -ForegroundColor Green
+            return $process.Id
+        } else {
+            Write-Host "❌ Failed to start $Name" -ForegroundColor Red
+            return $null
+        }
+    } catch {
+        Write-Host "❌ Error starting $Name`: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
     }
 }
 
@@ -99,58 +179,76 @@ if (-not (Test-Path "artisan")) {
     exit 1
 }
 
-# Check if .env exists
-if (-not (Test-Path ".env")) {
-    Write-Host "❌ .env file not found. Please create one first." -ForegroundColor Red
-    exit 1
-}
-
-# Check if database is ready
+# Check database connection
 Write-Host "Checking database connection..." -ForegroundColor Yellow
 try {
-    php artisan migrate:status --quiet
+    php artisan db:monitor --quiet
     Write-Host "✅ Database connection OK" -ForegroundColor Green
 } catch {
     Write-Host "❌ Database connection failed. Please check your database configuration." -ForegroundColor Red
     exit 1
 }
 
-# Check if queue table exists
-if (-not (Test-Path "database/migrations/*_create_jobs_table.php")) {
-    Write-Host "❌ Jobs table migration not found. Please run migrations first." -ForegroundColor Red
-    exit 1
+# Start Soketi WebSocket server
+if ($Global:ServicePIDs.ContainsKey("Soketi")) {
+    Write-Host "✅ Soketi already running (PID: $($Global:ServicePIDs['Soketi']))" -ForegroundColor Green
+} else {
+    Write-Host "Starting Soketi WebSocket Server..." -ForegroundColor Yellow
+    $soketiPID = Start-Service -Name "Soketi WebSocket Server" -Command "& '$soketiPath' start --config=soketi.json"
+    if ($soketiPID) {
+        $Global:ServicePIDs["Soketi"] = $soketiPID
+    } else {
+        Write-Host "❌ Failed to start Soketi" -ForegroundColor Red
+        exit 1
+    }
 }
-
-# Start Soketi WebSocket server using local executable
-Write-Host "Starting Soketi WebSocket server..." -ForegroundColor Yellow
-if (Test-Port 6001) {
-    Write-Host "⚠️  Port 6001 is already in use. Stopping existing process..." -ForegroundColor Yellow
-    Get-Process | Where-Object {$_.ProcessName -eq "node" -and $_.CommandLine -like "*soketi*"} | Stop-Process -Force
-    Start-Sleep -Seconds 2
-}
-
-Start-Service -Name "Soketi WebSocket Server" -Command "& '$soketiPath' start --config=soketi.json"
 
 # Wait for Soketi to start
 Write-Host "Waiting for Soketi to start..." -ForegroundColor Yellow
-Start-Sleep -Seconds 5
-
-# Check if Soketi is running
-if (Test-Port 6001) {
-    Write-Host "✅ Soketi WebSocket server started on port 6001" -ForegroundColor Green
-} else {
-    Write-Host "❌ Failed to start Soketi WebSocket server" -ForegroundColor Red
+$maxAttempts = 30
+$attempt = 0
+$soketiStarted = $false
+while ($attempt -lt $maxAttempts -and -not $soketiStarted) {
+    Start-Sleep -Seconds 1
+    $attempt++
+    if (Test-Soketi) {
+        $soketiStarted = $true
+        Write-Host "✅ Soketi WebSocket server started and responding on port 6001 (attempt $attempt)" -ForegroundColor Green
+    }
+}
+if (-not $soketiStarted) {
+    Write-Host "❌ Failed to start Soketi WebSocket server after $maxAttempts attempts" -ForegroundColor Red
     exit 1
 }
 
 # Start Laravel queue worker with Redis
-Write-Host "Starting Laravel queue worker with Redis..." -ForegroundColor Yellow
-Start-Service -Name "Laravel Queue Worker" -Command "php artisan queue:work --tries=3 --timeout=60 --connection=redis"
+if ($Global:ServicePIDs.ContainsKey("QueueWorker")) {
+    Write-Host "✅ Queue Worker already running (PID: $($Global:ServicePIDs['QueueWorker']))" -ForegroundColor Green
+} else {
+    Write-Host "Starting Laravel Queue Worker..." -ForegroundColor Yellow
+    $queueWorkerPID = Start-Service -Name "Laravel Queue Worker" -Command "php artisan queue:work --tries=3 --timeout=60 --connection=redis"
+    if ($queueWorkerPID) {
+        $Global:ServicePIDs["QueueWorker"] = $queueWorkerPID
+    } else {
+        Write-Host "❌ Failed to start Queue Worker" -ForegroundColor Red
+        exit 1
+    }
+}
 
-# Start Laravel development server (if not already running)
+# Start Laravel development server
 if (-not (Test-Port 8000)) {
-    Write-Host "Starting Laravel development server..." -ForegroundColor Yellow
-    Start-Service -Name "Laravel Development Server" -Command "php artisan serve --host=127.0.0.1 --port=8000"
+    if ($Global:ServicePIDs.ContainsKey("Laravel")) {
+         Write-Host "✅ Laravel Server already running (PID: $($Global:ServicePIDs['Laravel']))" -ForegroundColor Green
+    } else {
+        Write-Host "Starting Laravel Development Server..." -ForegroundColor Yellow
+        $laravelPID = Start-Service -Name "Laravel Development Server" -Command "php artisan serve --host=127.0.0.1 --port=8000"
+        if ($laravelPID) {
+            $Global:ServicePIDs["Laravel"] = $laravelPID
+        } else {
+            Write-Host "❌ Failed to start Laravel server" -ForegroundColor Red
+            exit 1
+        }
+    }
 } else {
     Write-Host "✅ Laravel server already running on port 8000" -ForegroundColor Green
 }
@@ -158,11 +256,12 @@ if (-not (Test-Port 8000)) {
 # Display status
 Write-Host ""
 Write-Host "🎉 All services started successfully!" -ForegroundColor Green
-Write-Host ""
+Save-ServicePIDs
 Write-Host "📊 Service Status:" -ForegroundColor Cyan
 Write-Host "  • Redis Server: 127.0.0.1:6379" -ForegroundColor White
-Write-Host "  • Soketi WebSocket Server: http://127.0.0.1:6001" -ForegroundColor White
-Write-Host "  • Laravel Application: http://127.0.0.1:8000" -ForegroundColor White
+Write-Host "  • Soketi WebSocket Server: http://127.0.0.1:6001 (PID: $($Global:ServicePIDs['Soketi']))" -ForegroundColor White
+Write-Host "  • Laravel Application: http://127.0.0.1:8000 (PID: $($Global:ServicePIDs['Laravel']))" -ForegroundColor White
+Write-Host "  • Queue Worker: PID $($Global:ServicePIDs['QueueWorker'])" -ForegroundColor White
 Write-Host "  • WebSocket Test Page: http://127.0.0.1:8000/websocket-test" -ForegroundColor White
 Write-Host ""
 Write-Host "🔧 Management Commands:" -ForegroundColor Cyan
@@ -170,6 +269,7 @@ Write-Host "  • Monitor Redis: redis-cli monitor" -ForegroundColor White
 Write-Host "  • View queue status: php artisan queue:monitor" -ForegroundColor White
 Write-Host "  • Check failed jobs: php artisan queue:failed" -ForegroundColor White
 Write-Host "  • Monitor WebSocket: & '$soketiPath' status" -ForegroundColor White
+Write-Host "  • Service PIDs file: $Global:PIDFile" -ForegroundColor White
 Write-Host ""
 Write-Host "⚡ Performance Features:" -ForegroundColor Cyan
 Write-Host "  • Redis Queue: Ultra-fast job processing" -ForegroundColor White
@@ -190,7 +290,7 @@ if (-not $Background) {
 
             # Check service status
             $redisRunning = Test-Port 6379
-            $soketiRunning = Test-Port 6001
+            $soketiRunning = Test-Soketi
             $laravelRunning = Test-Port 8000
 
             if (-not $redisRunning) {
@@ -208,12 +308,54 @@ if (-not $Background) {
     }
     catch {
         Write-Host ""
-        Write-Host "🛑 Stopping all services..." -ForegroundColor Red
+                Write-Host "🛑 Stopping all services..." -ForegroundColor Red
 
-        # Stop services
-        Get-Process | Where-Object {$_.ProcessName -eq "php" -and $_.CommandLine -like "*artisan*"} | Stop-Process -Force
-        Get-Process | Where-Object {$_.ProcessName -eq "node" -and $_.CommandLine -like "*soketi*"} | Stop-Process -Force
-        Get-Process | Where-Object {$_.ProcessName -eq "redis-server"} | Stop-Process -Force
+        # Stop services using tracked PIDs
+        if ($Global:ServicePIDs.Count -gt 0) {
+            Write-Host "Stopping tracked services..." -ForegroundColor Yellow
+
+            foreach ($service in $Global:ServicePIDs.GetEnumerator()) {
+                try {
+                    if (Get-Process -Id $service.Value -ErrorAction SilentlyContinue) {
+                        Stop-Process -Id $service.Value -Force
+                        Write-Host "✅ Stopped $($service.Key) (PID: $($service.Value))" -ForegroundColor Green
+                    }
+                } catch {
+                    Write-Host "⚠️  Could not stop $($service.Key) (PID: $($service.Value))" -ForegroundColor Yellow
+                }
+            }
+        } else {
+            # Fallback to process name-based stopping
+            Write-Host "Using fallback process stopping..." -ForegroundColor Yellow
+
+            try {
+                Get-Process | Where-Object {$_.ProcessName -eq "php"} | Stop-Process -Force
+            } catch {
+                Write-Host "⚠️  Could not stop PHP processes" -ForegroundColor Yellow
+            }
+
+            try {
+                Get-Process | Where-Object {$_.ProcessName -eq "node"} | Stop-Process -Force
+            } catch {
+                Write-Host "⚠️  Could not stop Node.js processes" -ForegroundColor Yellow
+            }
+        }
+
+        try {
+            Get-Process | Where-Object {$_.ProcessName -eq "redis-server"} | Stop-Process -Force
+        } catch {
+            Write-Host "⚠️  Could not stop Redis processes" -ForegroundColor Yellow
+        }
+
+        # Clean up PID file
+        try {
+            if (Test-Path $Global:PIDFile) {
+                Remove-Item $Global:PIDFile -Force
+                Write-Host "🗑️  PID file cleaned up" -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Host "⚠️  Could not clean up PID file" -ForegroundColor Yellow
+        }
 
         Write-Host "✅ All services stopped" -ForegroundColor Green
     }

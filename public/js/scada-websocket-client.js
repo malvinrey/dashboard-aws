@@ -7,7 +7,7 @@ class ScadaWebSocketClient {
         this.options = {
             url:
                 options.url ||
-                "ws://127.0.0.1:6001/app/scada_dashboard_key_2024",
+                `ws://${window.location.hostname}:6001/app/scada_dashboard_key_2024`,
             reconnectAttempts: options.reconnectAttempts || 10,
             reconnectDelay: options.reconnectDelay || 1000,
             maxReconnectDelay: options.maxReconnectDelay || 30000,
