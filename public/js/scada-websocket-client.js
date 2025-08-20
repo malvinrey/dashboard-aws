@@ -32,9 +32,9 @@ class ScadaWebSocketClient {
         this.connectionState = "disconnected";
         this.lastMessageTime = 0;
 
-        // Channel subscriptions
-        this.subscribedChannels = new Set();
+        // --- NEW ---: Handlers for specific channels and events
         this.channelHandlers = new Map();
+        this.subscribedChannels = new Set();
 
         // Start connection
         this.connect();
@@ -81,6 +81,32 @@ class ScadaWebSocketClient {
                 const data = JSON.parse(event.data);
                 this.lastMessageTime = Date.now();
 
+                // --- NEW ---: Handle Pusher protocol messages
+                if (data.event && data.event.startsWith("pusher:")) {
+                    if (data.event === "pusher:connection_established") {
+                        console.log(
+                            "Soketi connection established successfully."
+                        );
+                    }
+                    return; // Ignore other internal pusher events for now
+                }
+
+                // --- NEW ---: Route message to the correct handler
+                if (data.channel && data.event) {
+                    const channel = data.channel;
+                    const eventName = data.event;
+                    const handlerKey = `${channel}:${eventName}`;
+
+                    if (this.channelHandlers.has(handlerKey)) {
+                        // Parse the data property as it's often a JSON string
+                        const eventData =
+                            typeof data.data === "string"
+                                ? JSON.parse(data.data)
+                                : data.data;
+                        this.channelHandlers.get(handlerKey)(eventData);
+                    }
+                }
+
                 // Handle different message types
                 this.handleMessage(data);
 
@@ -98,13 +124,72 @@ class ScadaWebSocketClient {
                 event.code,
                 event.reason
             );
-            this.handleDisconnect(event);
+            this.isConnected = false;
+            this.connectionState = "disconnected";
+            this.stopHeartbeat();
+
+            if (this.onDisconnect) {
+                this.onDisconnect();
+            }
+
+            // Attempt to reconnect
+            this.attemptReconnect();
         };
 
         this.ws.onerror = (error) => {
             console.error("WebSocket error:", error);
             this.handleConnectionError(error);
         };
+    }
+
+    // --- NEW ---: Method to subscribe to a channel
+    subscribe(channelName, eventName, callback) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            // Store the handler for this channel/event combination
+            const handlerKey = `${channelName}:${eventName}`;
+            this.channelHandlers.set(handlerKey, callback);
+
+            // Subscribe to channel if not already subscribed
+            if (!this.subscribedChannels.has(channelName)) {
+                this.ws.send(
+                    JSON.stringify({
+                        event: "pusher:subscribe",
+                        data: {
+                            channel: channelName,
+                        },
+                    })
+                );
+                this.subscribedChannels.add(channelName);
+                console.log(`Subscribed to channel: ${channelName}`);
+            }
+        }
+    }
+
+    // --- NEW ---: Method to unsubscribe from a channel
+    unsubscribe(channelName) {
+        if (
+            this.ws &&
+            this.ws.readyState === WebSocket.OPEN &&
+            this.subscribedChannels.has(channelName)
+        ) {
+            this.ws.send(
+                JSON.stringify({
+                    event: "pusher:unsubscribe",
+                    data: {
+                        channel: channelName,
+                    },
+                })
+            );
+            this.subscribedChannels.delete(channelName);
+
+            // Remove all handlers for this channel
+            for (const [key] of this.channelHandlers) {
+                if (key.startsWith(`${channelName}:`)) {
+                    this.channelHandlers.delete(key);
+                }
+            }
+            console.log(`Unsubscribed from channel: ${channelName}`);
+        }
     }
 
     handleMessage(data) {
@@ -161,6 +246,13 @@ class ScadaWebSocketClient {
         }, this.options.heartbeatInterval);
     }
 
+    stopHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+    }
+
     handleDisconnect(event) {
         this.isConnected = false;
         this.connectionState = "disconnected";
@@ -212,79 +304,6 @@ class ScadaWebSocketClient {
             this.reconnectAttempts++;
             this.connect();
         }, delay);
-    }
-
-    subscribe(channelName, eventName = null, handler = null) {
-        if (!this.isConnected) {
-            console.warn("WebSocket not connected, cannot subscribe");
-            return false;
-        }
-
-        try {
-            // Subscribe to channel
-            const subscribeMessage = {
-                event: "pusher:subscribe",
-                data: {
-                    auth: null,
-                    channel: channelName,
-                },
-            };
-
-            this.ws.send(JSON.stringify(subscribeMessage));
-            this.subscribedChannels.add(channelName);
-
-            // Store handler if provided
-            if (handler) {
-                const handlerKey = eventName
-                    ? `${channelName}:${eventName}`
-                    : `${channelName}:*`;
-                this.channelHandlers.set(handlerKey, handler);
-            }
-
-            console.log(`Subscribed to channel: ${channelName}`);
-            return true;
-        } catch (error) {
-            console.error(
-                `Failed to subscribe to channel ${channelName}:`,
-                error
-            );
-            return false;
-        }
-    }
-
-    unsubscribe(channelName) {
-        if (!this.isConnected) {
-            console.warn("WebSocket not connected, cannot unsubscribe");
-            return false;
-        }
-
-        try {
-            const unsubscribeMessage = {
-                event: "pusher:unsubscribe",
-                data: {
-                    channel: channelName,
-                },
-            };
-
-            this.ws.send(JSON.stringify(unsubscribeMessage));
-            this.subscribedChannels.delete(channelName);
-
-            // Remove handlers for this channel
-            for (const [key] of this.channelHandlers) {
-                if (key.startsWith(channelName + ":")) {
-                    this.channelHandlers.delete(key);
-                }
-            }
-
-            console.log(`Unsubscribed from channel: ${channelName}`);
-            return true;
-        } catch (error) {
-            console.error(
-                `Failed to unsubscribe from channel ${channelName}:`,
-                error
-            );
-            return false;
-        }
     }
 
     resubscribeChannels() {
@@ -361,7 +380,7 @@ class ScadaWebSocketClient {
 class ScadaEchoClient {
     constructor(config = {}) {
         this.config = {
-            host: config.host || "127.0.0.1",
+            host: config.host || window.location.hostname,
             port: config.port || 6001,
             appKey: config.appKey || "scada_dashboard_key_2024",
             cluster: config.cluster || "mt1",
