@@ -1,6 +1,21 @@
 # Start All Services Fixed - PowerShell Script
 # This script starts all necessary services for WebSocket and Laravel to work properly
 
+param(
+	[string]$Environment = "local",
+	[switch]$Background
+)
+
+$targetScript = Join-Path $PSScriptRoot "start-websocket-services.ps1"
+if (Test-Path $targetScript) {
+	Write-Host "Using latest startup script: $targetScript" -ForegroundColor Cyan
+	$forwardParams = @{}
+	if ($PSBoundParameters.ContainsKey("Environment")) { $forwardParams.Environment = $Environment }
+	if ($PSBoundParameters.ContainsKey("Background") -and $Background) { $forwardParams.Background = $true }
+	& $targetScript @forwardParams
+	exit $LASTEXITCODE
+}
+
 Write-Host "Starting All Services for WebSocket Fix..." -ForegroundColor Green
 Write-Host "=============================================" -ForegroundColor Green
 
@@ -44,7 +59,7 @@ function Start-ServiceAndWait {
         return $false
     }
     catch {
-        Write-Host "Error starting $ServiceName: $_" -ForegroundColor Red
+        Write-Host ("Error starting {0}: {1}" -f $ServiceName, $_.Exception.Message) -ForegroundColor Red
         return $false
     }
 }

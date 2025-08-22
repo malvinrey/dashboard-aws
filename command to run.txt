@@ -1,0 +1,21 @@
+How to use
+
+Start (local artisan server) in background:
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-websocket-services.ps1 -Environment local -Background
+
+Start (nginx + php-cgi) in background:
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-websocket-services.ps1 -Environment nginx -Background
+
+Stop:
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-websocket-services.ps1
+
+Inspect PIDs:
+Get-Content -Raw -Path .\temp\websocket-services.pid
+
+Quick port checks:
+Test-NetConnection -ComputerName 127.0.0.1 -Port 6001 -InformationLevel Quiet
+Test-NetConnection -ComputerName 127.0.0.1 -Port 8000 -InformationLevel Quiet
+
+start-all-services-fixed.ps1 already forwards to the updated start-websocket-services.ps1 and preserves -Environment and -Background.
+
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-websocket-services.ps1 -Environment local

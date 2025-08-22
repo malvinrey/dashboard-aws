@@ -6,8 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SCADA WebSocket Test</title>
 
-    <!-- Include Pusher and SCADA WebSocket Client -->
+    <!-- Include Pusher, Laravel Echo, and SCADA WebSocket Client -->
     <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
+    <script>
+        window.Pusher = Pusher;
+    </script>
+    <script src="https://unpkg.com/laravel-echo/dist/echo.iife.js"></script>
     <script src="{{ asset('js/scada-websocket-client.js') }}"></script>
 
     <style>
@@ -357,133 +361,150 @@
 
     <script>
         let wsClient = null;
-        let dataCount = 0;
         let chartData = [];
-        let maxChartPoints = 50;
 
-        // Initialize WebSocket client
-        function initializeWebSocket() {
-            wsClient = new ScadaWebSocketClient({
-                serverUrl: 'ws://127.0.0.1:6001',
-                appKey: '{{ env('PUSHER_APP_KEY', 'your_app_key_here') }}',
-                appId: '{{ env('PUSHER_APP_ID', '12345') }}',
-                cluster: '{{ env('PUSHER_APP_CLUSTER', 'mt1') }}',
-                encrypted: false,
-                onConnect: handleConnect,
-                onMessage: handleMessage,
-                onError: handleError,
-                onDisconnect: handleDisconnect
-            });
-        }
-
-        // Handle WebSocket connection
-        function handleConnect() {
-            updateStatus('connected', 'Connected');
-            document.getElementById('connectBtn').disabled = true;
-            document.getElementById('disconnectBtn').disabled = false;
-            document.getElementById('subscribeBtn').disabled = false;
-            document.getElementById('testDataBtn').disabled = false;
-            addLog('Connected to WebSocket server', 'success');
-        }
-
-        // Handle WebSocket messages
-        function handleMessage(data) {
-            dataCount++;
-            document.getElementById('dataCount').textContent = dataCount;
-
-            // Update real-time values
-            if (data.temperature !== undefined) {
-                document.getElementById('temperatureValue').textContent = data.temperature.toFixed(1);
-            }
-            if (data.humidity !== undefined) {
-                document.getElementById('humidityValue').textContent = data.humidity.toFixed(1);
-            }
-            if (data.pressure !== undefined) {
-                document.getElementById('pressureValue').textContent = data.pressure.toFixed(1);
-            }
-
-            // Add to chart data
-            addChartData(data);
-
-            // Log message
-            addLog(`Data received: ${JSON.stringify(data)}`, 'info');
-        }
-
-        // Handle WebSocket errors
-        function handleError(error) {
-            updateStatus('error', 'Error');
-            addLog(`WebSocket error: ${error}`, 'error');
-        }
-
-        // Handle WebSocket disconnection
-        function handleDisconnect() {
-            updateStatus('disconnected', 'Disconnected');
-            document.getElementById('connectBtn').disabled = false;
-            document.getElementById('disconnectBtn').disabled = true;
-            document.getElementById('subscribeBtn').disabled = true;
-            document.getElementById('testDataBtn').disabled = true;
-            addLog('Disconnected from WebSocket server', 'warning');
-        }
-
-        // Update connection status
-        function updateStatus(status, text) {
-            const indicator = document.getElementById('statusIndicator');
-            const statusText = document.getElementById('statusText');
-
-            indicator.className = `status-indicator status-${status}`;
-            statusText.textContent = text;
-        }
-
-        // Add log entry
-        function addLog(message, type = 'info') {
+        // Fungsi untuk menambahkan log ke UI
+        function addLog(message, type = 'log') {
             const log = document.getElementById('messageLog');
-            const timestamp = new Date().toLocaleTimeString();
             const entry = document.createElement('div');
-            entry.className = `log-entry log-${type}`;
-            entry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+            entry.className = `log-entry ${type}`;
+            entry.innerHTML = `<span>${new Date().toLocaleTimeString()}</span> - ${message}`;
             log.appendChild(entry);
             log.scrollTop = log.scrollHeight;
         }
 
-        // Clear logs
-        function clearLogs() {
-            document.getElementById('messageLog').innerHTML = '';
-        }
+        // Fungsi untuk memperbarui status koneksi di UI
+        function updateStatus(state, text) {
+            const status = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
 
-        // Connect to WebSocket
-        function connectWebSocket() {
-            if (!wsClient) {
-                initializeWebSocket();
+            if (status && statusText) {
+                status.className = `status-indicator status-${state}`;
+                statusText.textContent = text;
             }
-            wsClient.connect();
-            updateStatus('connecting', 'Connecting...');
-            addLog('Attempting to connect...', 'info');
         }
 
-        // Disconnect from WebSocket
+        // Fungsi utama untuk menginisialisasi koneksi WebSocket
+        function initializeWebSocket() {
+            addLog('Initializing WebSocket...', 'info');
+
+            wsClient = new ScadaWebSocketClient({
+                onConnect: () => {
+                    updateStatus('connected', 'Connected');
+                    addLog('Successfully connected to WebSocket server!', 'success');
+
+                    // Setelah terhubung, subscribe ke channel yang diinginkan
+                    const channelName = 'scada-channel';
+                    const eventName = 'scada.data.received';
+                    addLog(`Subscribing to channel "${channelName}" for event "${eventName}"...`);
+
+                    wsClient.subscribe(channelName, eventName, (data) => {
+                        addLog(`Received data: ${JSON.stringify(data)}`, 'data');
+                        processData(data);
+                    });
+                },
+                onDisconnect: () => {
+                    updateStatus('disconnected', 'Disconnected');
+                    addLog('WebSocket connection lost.', 'error');
+                },
+                onError: (error) => {
+                    addLog(`WebSocket error: ${error.message || 'An unknown error occurred'}`, 'error');
+                }
+            });
+        }
+
+        // Fungsi untuk memulai koneksi dari tombol
+        function connectWebSocket() {
+            if (wsClient) {
+                addLog('Already connected or connecting.', 'warn');
+                return;
+            }
+            initializeWebSocket();
+        }
+
+        // Fungsi untuk memutus koneksi dari tombol
         function disconnectWebSocket() {
             if (wsClient) {
                 wsClient.disconnect();
+                wsClient = null;
+                updateStatus('disconnected', 'Disconnected by user');
+                addLog('Disconnected by user.', 'info');
+            } else {
+                addLog('Not connected.', 'warn');
             }
         }
 
-        // Subscribe to channels
-        function subscribeChannels() {
-            if (wsClient) {
-                wsClient.subscribe('scada-data');
-                wsClient.subscribe('scada-batch');
-                wsClient.subscribe('scada-aggregated');
-                updateChannelsInfo();
-                addLog('Subscribed to all channels', 'success');
+        // Proses data yang diterima
+        function processData(data) {
+            // Update real-time values jika ada
+            if (data.temperature !== undefined) {
+                const tempElement = document.getElementById('temperatureValue');
+                if (tempElement) tempElement.textContent = data.temperature.toFixed(1);
             }
+            if (data.humidity !== undefined) {
+                const humElement = document.getElementById('humidityValue');
+                if (humElement) humElement.textContent = data.humidity.toFixed(1);
+            }
+            if (data.pressure !== undefined) {
+                const pressElement = document.getElementById('pressureValue');
+                if (pressElement) pressElement.textContent = data.pressure.toFixed(1);
+            }
+
+            // Add to chart data
+            addChartData(data);
         }
 
-        // Update channels info
-        function updateChannelsInfo() {
-            if (wsClient) {
-                const channels = wsClient.getSubscribedChannels();
-                document.getElementById('channelsInfo').textContent = channels.join(', ') || 'None';
+        // Add data to chart
+        function addChartData(data) {
+            const timestamp = new Date().getTime();
+            chartData.push({
+                timestamp: timestamp,
+                temperature: data.temperature || 0,
+                humidity: data.humidity || 0,
+                pressure: data.pressure || 0
+            });
+
+            // Keep only last 50 points
+            if (chartData.length > 50) {
+                chartData.shift();
             }
+
+            // Update chart display
+            updateChartDisplay();
+        }
+
+        // Update chart display
+        function updateChartDisplay() {
+            const chart = document.getElementById('realtimeChart');
+            if (!chart) return;
+
+            if (chartData.length === 0) {
+                chart.innerHTML = 'Chart will appear here when data is received';
+                return;
+            }
+
+            let chartHtml = '<div style="padding: 20px;">';
+            chartHtml += '<h4>Recent Data Points</h4>';
+            chartHtml += '<div style="max-height: 300px; overflow-y: auto;">';
+
+            chartData.slice(-10).reverse().forEach((point, index) => {
+                const time = new Date(point.timestamp).toLocaleTimeString();
+                chartHtml += `
+                    <div style="border-bottom: 1px solid #eee; padding: 8px 0;">
+                        <strong>${time}</strong><br>
+                        T: ${point.temperature}°C | H: ${point.humidity}% | P: ${point.pressure}hPa
+                    </div>
+                `;
+            });
+
+            chartHtml += '</div></div>';
+            chart.innerHTML = chartHtml;
+        }
+
+        // Clear logs
+        function clearLogs() {
+            const log = document.getElementById('messageLog');
+            if (log) log.innerHTML = '';
         }
 
         // Send test data via API
@@ -512,54 +533,8 @@
                 });
         }
 
-        // Add data to chart
-        function addChartData(data) {
-            const timestamp = new Date().getTime();
-            chartData.push({
-                timestamp: timestamp,
-                temperature: data.temperature || 0,
-                humidity: data.humidity || 0,
-                pressure: data.pressure || 0
-            });
-
-            // Keep only last N points
-            if (chartData.length > maxChartPoints) {
-                chartData.shift();
-            }
-
-            // Update chart display (simple text representation for now)
-            updateChartDisplay();
-        }
-
-        // Update chart display
-        function updateChartDisplay() {
-            const chart = document.getElementById('realtimeChart');
-            if (chartData.length === 0) {
-                chart.innerHTML = 'Chart will appear here when data is received';
-                return;
-            }
-
-            let chartHtml = '<div style="padding: 20px;">';
-            chartHtml += '<h4>Recent Data Points</h4>';
-            chartHtml += '<div style="max-height: 300px; overflow-y: auto;">';
-
-            chartData.slice(-10).reverse().forEach((point, index) => {
-                const time = new Date(point.timestamp).toLocaleTimeString();
-                chartHtml += `
-                    <div style="border-bottom: 1px solid #eee; padding: 8px 0;">
-                        <strong>${time}</strong><br>
-                        T: ${point.temperature}°C | H: ${point.humidity}% | P: ${point.pressure}hPa
-                    </div>
-                `;
-            });
-
-            chartHtml += '</div></div>';
-            chart.innerHTML = chartHtml;
-        }
-
-        // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
-            addLog('Page loaded, ready to connect', 'info');
+            addLog('Page loaded, ready to connect.', 'info');
             updateStatus('disconnected', 'Disconnected');
         });
     </script>

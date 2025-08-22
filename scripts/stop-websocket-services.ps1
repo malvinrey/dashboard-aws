@@ -1,5 +1,9 @@
 Write-Host "Stopping SCADA WebSocket Services..." -ForegroundColor Red
 
+# Resolve PID file path (aligned with start script)
+$ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$PIDFile = Join-Path $ProjectRoot "temp\websocket-services.pid"
+
 # Function to stop service by name pattern
 function Stop-ServiceByPattern {
     param([string]$Pattern, [string]$Description)
@@ -42,13 +46,47 @@ function Stop-NodeService {
     }
 }
 
-# Stop Laravel services
-Stop-ServiceByPattern "artisan serve" "Laravel Development Server"
-Stop-ServiceByPattern "queue:work" "Laravel Queue Worker"
-Stop-ServiceByPattern "websockets:serve" "Laravel WebSocket Server"
+# Try stopping services using PID file first
+$usedPidFile = $false
+try {
+    if (Test-Path $PIDFile) {
+        $content = Get-Content -Path $PIDFile -Raw
+        if ($content) {
+            $map = $content | ConvertFrom-Json
+            if ($map) {
+                Write-Host "Stopping services by PID file: $PIDFile" -ForegroundColor Yellow
+                foreach ($prop in $map.PSObject.Properties) {
+                    $name = $prop.Name
+                    $pid = [int]$prop.Value
+                    try {
+                        if (Get-Process -Id $pid -ErrorAction SilentlyContinue) {
+                            Stop-Process -Id $pid -Force
+                            Write-Host " Stopped $name (PID: $pid)" -ForegroundColor Green
+                        } else {
+                            Write-Host " $name PID $pid not found" -ForegroundColor Gray
+                        }
+                    } catch {
+                        Write-Host " Could not stop $name (PID: $pid)" -ForegroundColor Yellow
+                    }
+                }
+                $usedPidFile = $true
+            }
+        }
+    }
+} catch {
+    Write-Host "Warning: Could not process PID file. Falling back to pattern-based stopping." -ForegroundColor Yellow
+}
 
-# Stop Soketi WebSocket server
-Stop-NodeService "Soketi WebSocket Server"
+# Fall back to pattern-based stopping if needed
+if (-not $usedPidFile) {
+    # Stop Laravel services
+    Stop-ServiceByPattern "artisan serve" "Laravel Development Server"
+    Stop-ServiceByPattern "queue:work" "Laravel Queue Worker"
+    Stop-ServiceByPattern "websockets:serve" "Laravel WebSocket Server"
+
+    # Stop Soketi WebSocket server
+    Stop-NodeService "Soketi WebSocket Server"
+}
 
 # Stop any remaining PHP processes related to this project
 try {
@@ -83,6 +121,13 @@ foreach ($port in $ports) {
 
 Write-Host ""
 Write-Host "All WebSocket services stopped successfully!" -ForegroundColor Green
+
+# Clean up PID file
+try {
+    if (Test-Path $PIDFile) { Remove-Item $PIDFile -Force; Write-Host "PID file removed: $PIDFile" -ForegroundColor Cyan }
+} catch {
+    Write-Host "Could not delete PID file: $PIDFile" -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "To restart services, run:" -ForegroundColor Cyan
 Write-Host "  .\scripts\start-websocket-services.ps1" -ForegroundColor White
