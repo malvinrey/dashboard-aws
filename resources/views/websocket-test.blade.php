@@ -269,7 +269,9 @@
                 <div style="margin-top: 10px;">
                     <strong>Server:</strong> <span id="serverInfo">ws://127.0.0.1:8080</span><br>
                     <strong>Channels:</strong> <span id="channelsInfo">None</span><br>
-                    <strong>Broadcaster:</strong> <span id="broadcasterInfo">Laravel Reverb</span>
+                    <strong>Broadcaster:</strong> <span id="broadcasterInfo">Laravel Reverb</span><br>
+                    <strong>Note:</strong> <span style="color: #6c757d; font-size: 0.9em;">Using public channels only
+                        (no authentication required)</span>
                 </div>
             </div>
 
@@ -432,7 +434,7 @@
             }
 
             try {
-                // Subscribe ke channel SCADA
+                // Subscribe ke public channel SCADA (tidak perlu authentication)
                 const channel = echo.channel('scada-channel');
 
                 channel.listen('ScadaDataReceived', (e) => {
@@ -440,16 +442,16 @@
                     processData(e);
                 });
 
-                // Subscribe ke private channel jika diperlukan
-                const privateChannel = echo.private('scada-private');
+                // Subscribe ke channel tambahan untuk test data
+                const testChannel = echo.channel('scada-test');
 
-                privateChannel.listen('ScadaDataReceived', (e) => {
-                    addLog(`Received private SCADA data: ${JSON.stringify(e)}`, 'success');
+                testChannel.listen('ScadaDataReceived', (e) => {
+                    addLog(`Received test SCADA data: ${JSON.stringify(e)}`, 'success');
                     processData(e);
                 });
 
                 addLog('Subscribed to SCADA channels successfully', 'success');
-                document.getElementById('channelsInfo').textContent = 'scada-channel, scada-private';
+                document.getElementById('channelsInfo').textContent = 'scada-channel, scada-test';
 
             } catch (error) {
                 addLog(`Error subscribing to channels: ${error.message}`, 'error');
@@ -479,11 +481,21 @@
         // Send test data via API
         function sendTestData() {
             const testData = {
-                temperature: (20 + Math.random() * 20).toFixed(1),
-                humidity: (40 + Math.random() * 40).toFixed(1),
-                pressure: (1000 + Math.random() * 50).toFixed(1),
-                timestamp: new Date().toISOString()
+                DataArray: [{
+                    _groupTag: "websocket-test",
+                    _terminalTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+                    temperature: parseFloat((20 + Math.random() * 20).toFixed(1)),
+                    humidity: parseFloat((40 + Math.random() * 40).toFixed(1)),
+                    pressure: parseFloat((1000 + Math.random() * 50).toFixed(1)),
+                    rainfall: parseFloat((Math.random() * 10).toFixed(1)),
+                    wind_speed: parseFloat((Math.random() * 20).toFixed(1)),
+                    wind_direction: Math.floor(Math.random() * 360),
+                    par_sensor: parseFloat((Math.random() * 1000).toFixed(1)),
+                    solar_radiation: parseFloat((Math.random() * 1000).toFixed(1))
+                }]
             };
+
+            addLog(`Sending test data: ${JSON.stringify(testData)}`, 'info');
 
             fetch('/api/receiver', {
                     method: 'POST',
@@ -493,12 +505,37 @@
                     },
                     body: JSON.stringify(testData)
                 })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(errorData => {
+                            throw new Error(`HTTP ${response.status}: ${JSON.stringify(errorData)}`);
+                        });
+                    }
+                    return response.json();
+                })
                 .then(data => {
-                    addLog(`Test data sent: ${JSON.stringify(testData)}`, 'success');
+                    addLog(`Test data sent successfully: ${JSON.stringify(data)}`, 'success');
+
+                    // Update data count
+                    dataCount++;
+                    document.getElementById('dataCount').textContent = dataCount;
+
+                    // Update real-time values
+                    if (testData.DataArray[0].temperature !== undefined) {
+                        document.getElementById('temperatureValue').textContent = testData.DataArray[0].temperature
+                            .toFixed(1);
+                    }
+                    if (testData.DataArray[0].humidity !== undefined) {
+                        document.getElementById('humidityValue').textContent = testData.DataArray[0].humidity.toFixed(
+                            1);
+                    }
+                    if (testData.DataArray[0].pressure !== undefined) {
+                        document.getElementById('pressureValue').textContent = testData.DataArray[0].pressure.toFixed(
+                            1);
+                    }
                 })
                 .catch(error => {
-                    addLog(`Error sending test data: ${error}`, 'error');
+                    addLog(`Error sending test data: ${error.message}`, 'error');
                 });
         }
 

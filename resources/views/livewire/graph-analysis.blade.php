@@ -4,19 +4,8 @@
 @endphp
 
 <div>
-    {{-- Sertakan file JavaScript WebSocket dan komponen Alpine --}}
-    @push('scripts')
-        <!-- Include Pusher library for WebSocket client -->
-        <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
-        <script src="{{ asset('js/scada-websocket-client.js') }}" defer></script>
-        <script src="{{ asset('js/scada-chart-manager.js') }}" defer></script>
-        <script src="{{ asset('js/analysis-chart-component.js') }}" defer></script>
-        <script>
-            // Expose default tags from backend for initial WebSocket connection and UI rendering
-            window.ANALYSIS_DEFAULT_TAGS = @json($selectedTags);
-            window.ANALYSIS_ALL_TAGS = @json($allTags);
-        </script>
-    @endpush
+    {{-- Gunakan @vite untuk memuat semua dependencies JavaScript --}}
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 
     {{-- Panggil komponen Alpine dengan cara yang sangat bersih --}}
     <div wire:init="loadHistoricalData('{{ $startDate }}', '{{ $endDate }}')" x-data="analysisChartComponent"
@@ -49,6 +38,43 @@
                     <div class="text-sm text-gray-500">
                         Last update: <span id="lastUpdateTime">-</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Real-time Metrics Dashboard -->
+            <div class="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                <h3 class="text-lg font-semibold text-blue-800 mb-3">Real-time Metrics</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    @foreach ($selectedTags as $tag)
+                        <div class="bg-white rounded-lg p-3 shadow-sm border border-blue-100">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium text-gray-600">{{ Str::headline($tag) }}</span>
+                                <span
+                                    class="text-xs px-2 py-1 rounded-full
+                                    {{ $realtimeMetrics[$tag]['trend'] === 'rising'
+                                        ? 'bg-green-100 text-green-800'
+                                        : ($realtimeMetrics[$tag]['trend'] === 'falling'
+                                            ? 'bg-red-100 text-red-800'
+                                            : 'bg-gray-100 text-gray-800') }}">
+                                    {{ $realtimeMetrics[$tag]['trend'] }}
+                                </span>
+                            </div>
+                            <div class="mt-2">
+                                <div class="text-2xl font-bold text-blue-900" id="current-{{ $tag }}">
+                                    {{ number_format($realtimeMetrics[$tag]['current'], 2) }}
+                                </div>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    Min:
+                                    {{ $realtimeMetrics[$tag]['min'] !== null ? number_format($realtimeMetrics[$tag]['min'], 2) : 'N/A' }}
+                                    |
+                                    Max:
+                                    {{ $realtimeMetrics[$tag]['max'] !== null ? number_format($realtimeMetrics[$tag]['max'], 2) : 'N/A' }}
+                                    |
+                                    Avg: {{ number_format($realtimeMetrics[$tag]['avg'], 2) }}
+                                </div>
+                            </div>
+                        </div>
+                    @endforeach
                 </div>
             </div>
 
@@ -115,6 +141,13 @@
                     <i class="fas fa-redo"></i>
                     <span>Refresh</span>
                 </button>
+
+                <!-- WebSocket Connection Toggle -->
+                <button id="websocketToggleBtn"
+                    class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-md flex items-center space-x-2 transition-colors">
+                    <i class="fas fa-wifi"></i>
+                    <span>Enable WebSocket</span>
+                </button>
             </div>
 
             <!-- Channel Selection -->
@@ -154,27 +187,50 @@
                     <p class="text-2xl font-bold text-purple-900" id="updateRate">0/s</p>
                 </div>
             </div>
+
+            <!-- WebSocket Performance Metrics -->
+            <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+                <h3 class="text-lg font-semibold text-gray-800 mb-3">WebSocket Performance</h3>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-blue-600" id="websocketStatus">Disconnected</div>
+                        <div class="text-sm text-gray-600">Connection Status</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-green-600" id="websocketLatency">-</div>
+                        <div class="text-sm text-gray-600">Latency (ms)</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-purple-600" id="websocketMessages">0</div>
+                        <div class="text-sm text-gray-600">Messages/sec</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-orange-600" id="websocketErrors">0</div>
+                        <div class="text-sm text-gray-600">Errors</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- WebSocket Integration Script -->
         <script>
             document.addEventListener('DOMContentLoaded', function() {
-                // Initialize Laravel Echo for compatibility
+                // Initialize Laravel Echo for Reverb compatibility
                 if (typeof ScadaEchoClient !== 'undefined') {
                     new ScadaEchoClient({
-                        serverUrl: 'http://127.0.0.1:6001',
-                        appKey: '{{ env('PUSHER_APP_KEY', 'scada_dashboard_key_2024') }}',
-                        cluster: '{{ env('PUSHER_APP_CLUSTER', 'mt1') }}'
+                        serverUrl: `{{ env('REVERB_SCHEME', 'http') }}://{{ env('REVERB_HOST', '127.0.0.1') }}:{{ env('REVERB_PORT', 8080) }}`,
+                        appKey: '{{ env('REVERB_APP_KEY', 'scada_dashboard_key_2024') }}',
+                        cluster: '{{ env('REVERB_APP_CLUSTER', 'mt1') }}'
                     });
-                    console.log('Laravel Echo initialized for compatibility.');
+                    console.log('Laravel Echo initialized for Reverb compatibility.');
                 }
 
                 // Initialize WebSocket client for real-time data
                 const wsClient = new ScadaWebSocketClient({
-                    serverUrl: 'ws://127.0.0.1:6001',
-                    appKey: '{{ env('PUSHER_APP_KEY', 'scada_dashboard_key_2024') }}',
-                    appId: '{{ env('PUSHER_APP_ID', '12345') }}',
-                    cluster: '{{ env('PUSHER_APP_CLUSTER', 'mt1') }}',
+                    serverUrl: `{{ env('REVERB_SCHEME', 'http') }}://{{ env('REVERB_HOST', '127.0.0.1') }}:{{ env('REVERB_PORT', 8080) }}`,
+                    appKey: '{{ env('REVERB_APP_KEY', 'scada_dashboard_key_2024') }}',
+                    appId: '{{ env('REVERB_APP_ID', '12345') }}',
+                    cluster: '{{ env('REVERB_APP_CLUSTER', 'mt1') }}',
                     encrypted: false,
                     channel: 'scada-data'
                 });
@@ -191,11 +247,21 @@
                 wsClient.onConnect = function() {
                     console.log('WebSocket connected successfully');
                     updateConnectionStatus('connected', 'Connected');
+
+                    // Notify Livewire component
+                    if (window.Livewire) {
+                        window.Livewire.dispatch('reverb-connected');
+                    }
                 };
 
                 wsClient.onDisconnect = function() {
                     console.log('WebSocket disconnected');
                     updateConnectionStatus('disconnected', 'Disconnected');
+
+                    // Notify Livewire component
+                    if (window.Livewire) {
+                        window.Livewire.dispatch('reverb-disconnected');
+                    }
                 };
 
                 wsClient.onMessage = function(data) {
@@ -208,6 +274,8 @@
                             window.Livewire.dispatch('chart-data-updated', scadaData);
                         }
 
+                        // Update real-time metrics display
+                        updateRealtimeMetrics(scadaData);
                         updateLastUpdateTime();
                     }
                 };
@@ -215,12 +283,20 @@
                 wsClient.onError = function(error) {
                     console.error('WebSocket error:', error);
                     updateConnectionStatus('error', 'Error');
+
+                    // Update error counter
+                    const errorElement = document.getElementById('websocketErrors');
+                    if (errorElement) {
+                        const currentErrors = parseInt(errorElement.textContent) || 0;
+                        errorElement.textContent = currentErrors + 1;
+                    }
                 };
 
                 // Update connection status UI
                 function updateConnectionStatus(status, text) {
                     const indicator = document.getElementById('connectionIndicator');
                     const statusText = document.getElementById('connectionStatus');
+                    const websocketStatusElement = document.getElementById('websocketStatus');
 
                     if (indicator && statusText) {
                         indicator.className = `w-3 h-3 rounded-full ${
@@ -229,6 +305,26 @@
                         }`;
                         statusText.textContent = text;
                     }
+
+                    if (websocketStatusElement) {
+                        websocketStatusElement.textContent = text;
+                        websocketStatusElement.className = `text-2xl font-bold ${
+                            status === 'connected' ? 'text-green-600' :
+                            status === 'disconnected' ? 'text-red-600' : 'text-yellow-600'
+                        }`;
+                    }
+                }
+
+                // Update real-time metrics display
+                function updateRealtimeMetrics(data) {
+                    Object.keys(data).forEach(tag => {
+                        if (typeof data[tag] === 'number') {
+                            const currentElement = document.getElementById(`current-${tag}`);
+                            if (currentElement) {
+                                currentElement.textContent = data[tag].toFixed(2);
+                            }
+                        }
+                    });
                 }
 
                 // Update last update time
@@ -238,6 +334,41 @@
                         lastUpdateElement.textContent = new Date().toLocaleTimeString();
                     }
                 }
+
+                // WebSocket toggle button
+                const websocketToggleBtn = document.getElementById('websocketToggleBtn');
+                if (websocketToggleBtn) {
+                    websocketToggleBtn.addEventListener('click', function() {
+                        if (wsClient.isConnected()) {
+                            wsClient.disconnect();
+                            this.innerHTML = '<i class="fas fa-wifi"></i><span>Enable WebSocket</span>';
+                            this.className =
+                                'bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-md flex items-center space-x-2 transition-colors';
+                        } else {
+                            wsClient.connect();
+                            this.innerHTML = '<i class="fas fa-wifi-slash"></i><span>Disable WebSocket</span>';
+                            this.className =
+                                'bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md flex items-center space-x-2 transition-colors';
+                        }
+                    });
+                }
+
+                // Performance monitoring
+                let messageCount = 0;
+                let lastMessageTime = Date.now();
+
+                setInterval(() => {
+                    const now = Date.now();
+                    const messagesPerSecond = messageCount / ((now - lastMessageTime) / 1000);
+
+                    const messagesElement = document.getElementById('websocketMessages');
+                    if (messagesElement) {
+                        messagesElement.textContent = messagesPerSecond.toFixed(1);
+                    }
+
+                    messageCount = 0;
+                    lastMessageTime = now;
+                }, 1000);
 
                 // Cleanup on page unload
                 window.addEventListener('beforeunload', function() {
@@ -329,6 +460,55 @@
 
                 100% {
                     transform: rotate(360deg);
+                }
+            }
+
+            /* Real-time metrics styling */
+            .realtime-metric {
+                transition: all 0.3s ease;
+            }
+
+            .realtime-metric:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            }
+
+            /* Trend indicators */
+            .trend-rising {
+                color: #059669;
+                animation: pulse-green 2s infinite;
+            }
+
+            .trend-falling {
+                color: #dc2626;
+                animation: pulse-red 2s infinite;
+            }
+
+            .trend-stable {
+                color: #6b7280;
+            }
+
+            @keyframes pulse-green {
+
+                0%,
+                100% {
+                    opacity: 1;
+                }
+
+                50% {
+                    opacity: 0.7;
+                }
+            }
+
+            @keyframes pulse-red {
+
+                0%,
+                100% {
+                    opacity: 1;
+                }
+
+                50% {
+                    opacity: 0.7;
                 }
             }
         </style>

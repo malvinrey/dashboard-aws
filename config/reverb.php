@@ -32,7 +32,7 @@ return [
             'host' => env('REVERB_SERVER_HOST', '0.0.0.0'),
             'port' => env('REVERB_SERVER_PORT', 8080),
             'path' => env('REVERB_SERVER_PATH', ''),
-            'hostname' => env('REVERB_HOST'),
+            'hostname' => env('REVERB_HOST', '127.0.0.1'),
             'options' => [
                 'tls' => [],
             ],
@@ -73,14 +73,14 @@ return [
 
         'apps' => [
             [
-                'key' => env('REVERB_APP_KEY'),
-                'secret' => env('REVERB_APP_SECRET'),
-                'app_id' => env('REVERB_APP_ID'),
+                'key' => env('REVERB_APP_KEY', 'scada_dashboard_key_2024'),
+                'secret' => env('REVERB_APP_SECRET', 'scada_dashboard_secret_2024'),
+                'app_id' => env('REVERB_APP_ID', '12345'),
                 'options' => [
-                    'host' => env('REVERB_HOST'),
-                    'port' => env('REVERB_PORT', 443),
-                    'scheme' => env('REVERB_SCHEME', 'https'),
-                    'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
+                    'host' => env('REVERB_HOST', '127.0.0.1'),
+                    'port' => env('REVERB_PORT', 8080),
+                    'scheme' => env('REVERB_SCHEME', 'http'),
+                    'useTLS' => env('REVERB_SCHEME', 'http') === 'https',
                 ],
                 'allowed_origins' => ['*'],
                 'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),

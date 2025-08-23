@@ -35,7 +35,12 @@ try {
     $event = new ScadaDataReceived($testData, 'scada-channel');
 
     // Test 4: Check event configuration
-    echo "✅ Event channel: " . $event->broadcastOn()->name . "\n";
+    $channels = $event->broadcastOn();
+    $channelNames = [];
+    foreach ($channels as $channel) {
+        $channelNames[] = $channel->name;
+    }
+    echo "✅ Event channels: " . implode(', ', $channelNames) . "\n";
     echo "✅ Event name: " . $event->broadcastAs() . "\n";
     echo "✅ Event data: " . json_encode($event->broadcastWith()) . "\n";
 

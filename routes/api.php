@@ -5,6 +5,9 @@ use App\Http\Controllers\Api\ReceiverController;
 
 Route::post('/aws/receiver', [ReceiverController::class, 'store']);
 
+// Route untuk test data SCADA
+Route::post('/receiver', [ReceiverController::class, 'store']);
+
 // Test route untuk POST request
 Route::post('/test-post', function () {
     return response()->json(['status' => 'success', 'message' => 'POST request works!']);

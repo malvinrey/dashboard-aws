@@ -32,16 +32,20 @@ class AnalysisChart extends Component
     // KUNCI PERBAIKAN: Tambahkan properti ini untuk mengontrol polling
     public bool $realtimeEnabled = true;
 
-    // WebSocket Integration Properties
+    // WebSocket Integration Properties (Updated for Reverb)
     public string $websocketStatus = 'disconnected';
     public ?string $lastWebSocketUpdate = null;
     public array $websocketData = [];
+    public array $realtimeMetrics = [];
 
-    // WebSocket Event Listeners
+    // WebSocket Event Listeners (Updated for Reverb)
     protected $listeners = [
-        'echo:scada-data,scada.data.received' => 'handleWebSocketData',
+        'echo:scada-channel,scada.data.received' => 'handleWebSocketData',
         'echo:scada-realtime,scada.data.received' => 'handleRealtimeData',
-        'websocket-status-updated' => 'updateWebSocketStatus'
+        'echo:scada-analysis,scada.data.updated' => 'handleAnalysisData',
+        'websocket-status-updated' => 'updateWebSocketStatus',
+        'reverb-connected' => 'handleReverbConnected',
+        'reverb-disconnected' => 'handleReverbDisconnected'
     ];
 
     /**
@@ -56,20 +60,31 @@ class AnalysisChart extends Component
         $defaultMetrics = ['temperature', 'humidity', 'pressure'];
         $this->selectedTags = array_intersect($defaultMetrics, $this->allTags);
 
-        // // If default metrics don't exist, select the first available one
-        // if (empty($this->selectedTags) && !empty($this->allTags)) {
-        //     $this->selectedTags = [$this->allTags[0]];
-        // }
-
         // Set default date range to the last 24 hours
         $this->startDate = now()->subDay()->toDateString();
         $this->endDate = now()->toDateString();
+
+        // Initialize realtime metrics
+        $this->initializeRealtimeMetrics();
     }
 
     /**
-     * KUNCI PERBAIKAN: Metode updatedInterval() telah dihapus sepenuhnya.
-     * Mengubah interval sekarang tidak akan lagi me-reset tanggal yang sudah dipilih.
+     * Initialize realtime metrics structure
      */
+    private function initializeRealtimeMetrics()
+    {
+        foreach ($this->selectedTags as $tag) {
+            $this->realtimeMetrics[$tag] = [
+                'current' => 0,
+                'min' => null,
+                'max' => null,
+                'avg' => 0,
+                'count' => 0,
+                'last_update' => null,
+                'trend' => 'stable' // rising, falling, stable
+            ];
+        }
+    }
 
     /**
      * Dijalankan saat toggle real-time diubah oleh pengguna.
@@ -113,14 +128,12 @@ class AnalysisChart extends Component
      */
     public function loadChartData()
     {
-        // HAPUS BARIS INI: $this->realtimeEnabled = false;
-
         Log::info('Executing loadChartData', [
             'selectedTags' => $this->selectedTags,
             'interval' => $this->interval,
             'startDate' => $this->startDate,
             'endDate' => $this->endDate,
-            'isRealtime' => $this->realtimeEnabled // Tambahkan log untuk status saat ini
+            'isRealtime' => $this->realtimeEnabled
         ]);
 
         if (empty($this->selectedTags)) {
@@ -141,7 +154,6 @@ class AnalysisChart extends Component
             $end
         );
 
-        // ... (sisa logika di metode ini tidak berubah)
         if ($this->interval === 'second' && !empty($chartData['data'])) {
             $earliestTimestamp = collect($chartData['data'])->flatMap(fn($trace) => $trace['x'])->min();
             if ($earliestTimestamp) {
@@ -149,7 +161,7 @@ class AnalysisChart extends Component
             }
         }
 
-        $this->dispatch('chart-data-updated', chartData: $chartData);
+        $this->dispatch('historicalDataLoaded', data: $chartData);
     }
 
     /**
@@ -187,7 +199,7 @@ class AnalysisChart extends Component
      * Fetches the latest data point for real-time updates.
      * Called by `wire:poll` every 5 seconds.
      *
-     * @deprecated Gunakan SSE stream untuk real-time updates yang lebih efisien
+     * @deprecated Gunakan WebSocket stream untuk real-time updates yang lebih efisien
      */
     public function getLatestDataPoint()
     {
@@ -204,9 +216,9 @@ class AnalysisChart extends Component
     }
 
     /**
-     * Get SSE stream URL untuk real-time updates
+     * Get WebSocket stream URL untuk real-time updates
      */
-    public function getSseStreamUrl(): string
+    public function getWebSocketStreamUrl(): string
     {
         if (empty($this->selectedTags)) {
             return '';
@@ -217,7 +229,7 @@ class AnalysisChart extends Component
             'interval' => $this->interval
         ]);
 
-        return "/api/sse/stream?{$params}";
+        return "/api/websocket/stream?{$params}";
     }
 
     /**
@@ -264,13 +276,8 @@ class AnalysisChart extends Component
         }
     }
 
-
-
-    // HAPUS method 'catchUpMissedData' - SUDAH TIDAK DIPERLUKAN
-    // Gap sekarang dibuat langsung di frontend visibilitychange listener
-
     /**
-     * Handle WebSocket data received from scada-data channel
+     * Handle WebSocket data received from scada-data channel (Updated for Reverb)
      */
     public function handleWebSocketData($event)
     {
@@ -280,6 +287,9 @@ class AnalysisChart extends Component
             if (!empty($data)) {
                 $this->websocketData[] = $data;
                 $this->lastWebSocketUpdate = now();
+
+                // Update realtime metrics
+                $this->updateRealtimeMetrics($data);
 
                 // Limit data points untuk performance
                 if (count($this->websocketData) > 1000) {
@@ -313,6 +323,114 @@ class AnalysisChart extends Component
     }
 
     /**
+     * Handle analysis-specific data from scada-analysis channel
+     */
+    public function handleAnalysisData($event)
+    {
+        try {
+            $data = $event['data'] ?? [];
+
+            if (!empty($data)) {
+                // Update analysis-specific metrics
+                $this->updateAnalysisMetrics($data);
+
+                // Dispatch to frontend
+                $this->dispatch('analysis-data-updated', $data);
+
+                Log::info('Analysis data received via WebSocket', [
+                    'data_type' => 'analysis',
+                    'timestamp' => now()
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Error handling analysis data', [
+                'error' => $e->getMessage(),
+                'event' => $event
+            ]);
+        }
+    }
+
+    /**
+     * Update realtime metrics with new data
+     */
+    private function updateRealtimeMetrics($data)
+    {
+        foreach ($this->selectedTags as $tag) {
+            if (isset($data[$tag]) && is_numeric($data[$tag])) {
+                $value = floatval($data[$tag]);
+                $current = $this->realtimeMetrics[$tag]['current'];
+
+                // Update current value
+                $this->realtimeMetrics[$tag]['current'] = $value;
+
+                // Update min/max
+                if ($this->realtimeMetrics[$tag]['min'] === null || $value < $this->realtimeMetrics[$tag]['min']) {
+                    $this->realtimeMetrics[$tag]['min'] = $value;
+                }
+                if ($this->realtimeMetrics[$tag]['max'] === null || $value > $this->realtimeMetrics[$tag]['max']) {
+                    $this->realtimeMetrics[$tag]['max'] = $value;
+                }
+
+                // Update average
+                $this->realtimeMetrics[$tag]['count']++;
+                $this->realtimeMetrics[$tag]['avg'] =
+                    (($this->realtimeMetrics[$tag]['avg'] * ($this->realtimeMetrics[$tag]['count'] - 1)) + $value) / $this->realtimeMetrics[$tag]['count'];
+
+                // Update trend
+                if ($current !== 0) {
+                    if ($value > $current) {
+                        $this->realtimeMetrics[$tag]['trend'] = 'rising';
+                    } elseif ($value < $current) {
+                        $this->realtimeMetrics[$tag]['trend'] = 'falling';
+                    } else {
+                        $this->realtimeMetrics[$tag]['trend'] = 'stable';
+                    }
+                }
+
+                $this->realtimeMetrics[$tag]['last_update'] = now();
+            }
+        }
+    }
+
+    /**
+     * Update analysis-specific metrics
+     */
+    private function updateAnalysisMetrics($data)
+    {
+        // Handle analysis-specific data updates
+        // This can include trend analysis, anomaly detection, etc.
+        if (isset($data['anomalies'])) {
+            $this->dispatch('anomalies-detected', $data['anomalies']);
+        }
+
+        if (isset($data['trends'])) {
+            $this->dispatch('trends-updated', $data['trends']);
+        }
+    }
+
+    /**
+     * Handle Reverb connection established
+     */
+    public function handleReverbConnected()
+    {
+        $this->websocketStatus = 'connected';
+        $this->dispatch('websocket-status-updated', 'connected');
+
+        Log::info('Reverb WebSocket connection established');
+    }
+
+    /**
+     * Handle Reverb connection lost
+     */
+    public function handleReverbDisconnected()
+    {
+        $this->websocketStatus = 'disconnected';
+        $this->dispatch('websocket-status-updated', 'disconnected');
+
+        Log::info('Reverb WebSocket connection lost');
+    }
+
+    /**
      * Update WebSocket connection status
      */
     public function updateWebSocketStatus($status)
@@ -330,8 +448,17 @@ class AnalysisChart extends Component
             'status' => $this->websocketStatus,
             'last_update' => $this->lastWebSocketUpdate,
             'data_points' => count($this->websocketData),
-            'realtime_enabled' => $this->realtimeEnabled
+            'realtime_enabled' => $this->realtimeEnabled,
+            'realtime_metrics' => $this->realtimeMetrics
         ];
+    }
+
+    /**
+     * Get realtime metrics for display
+     */
+    public function getRealtimeMetrics()
+    {
+        return $this->realtimeMetrics;
     }
 
     /**

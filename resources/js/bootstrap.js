@@ -9,8 +9,6 @@ window.axios.defaults.headers.common["X-Requested-With"] = "XMLHttpRequest";
  * allows your team to easily build robust real-time web applications.
  */
 
-// (KODE LAMA ANDA DIHAPUS DARI SINI)
-
 // ========================================================================
 // BLOK KODE BARU DIMULAI DI SINI
 // ========================================================================
@@ -21,15 +19,14 @@ import Pusher from "pusher-js";
 window.Pusher = Pusher;
 
 window.Echo = new Echo({
-    broadcaster: "reverb", // Gunakan 'reverb' agar lebih jelas
+    broadcaster: "reverb", // Gunakan 'reverb' agar lebih jelas dan konsisten
     key: import.meta.env.VITE_REVERB_APP_KEY,
     wsHost: import.meta.env.VITE_REVERB_HOST,
     wsPort: parseInt(import.meta.env.VITE_REVERB_PORT),
     wssPort: parseInt(import.meta.env.VITE_REVERB_PORT),
-    enabledTransports: ["ws", "wss"],
-    // Opsi di bawah ini sudah diatur oleh Reverb secara default
-    // forceTLS: false,
-    // disableStats: true,
+    forceTLS: false, // Paksa menggunakan WS (non-secure) untuk development
+    enabledTransports: ["ws"], // Hanya gunakan WS, bukan WSS
+    disableStats: true, // Matikan stats untuk mengurangi noise
 });
 
 // ========================================================================

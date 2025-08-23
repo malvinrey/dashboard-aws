@@ -32,14 +32,18 @@ return [
 
         'reverb' => [
             'driver' => 'reverb',
-            'key' => env('REVERB_APP_KEY'),
-            'secret' => env('REVERB_APP_SECRET'),
-            'app_id' => env('REVERB_APP_ID'),
+            'key' => env('REVERB_APP_KEY', 'scada_dashboard_key_2024'),
+            'secret' => env('REVERB_APP_SECRET', 'scada_dashboard_secret_2024'),
+            'app_id' => env('REVERB_APP_ID', '12345'),
             'options' => [
                 'host' => env('REVERB_HOST', '127.0.0.1'),
                 'port' => env('REVERB_PORT', 8080),
                 'scheme' => env('REVERB_SCHEME', 'http'),
                 'useTLS' => env('REVERB_SCHEME', 'http') === 'https',
+                'curl_options' => [
+                    CURLOPT_SSL_VERIFYHOST => 0,
+                    CURLOPT_SSL_VERIFYPEER => 0,
+                ],
             ],
         ],
 
@@ -52,7 +56,7 @@ return [
                 'cluster' => env('PUSHER_APP_CLUSTER'),
                 'encrypted' => env('PUSHER_APP_ENCRYPTED', false),
                 'host' => env('PUSHER_HOST', '127.0.0.1'),
-                'port' => env('PUSHER_PORT', 8080),
+                'port' => env('PUSHER_PORT', 6001),
                 'scheme' => env('PUSHER_SCHEME', 'http'),
                 'useTLS' => env('PUSHER_SCHEME', 'http') === 'https',
                 'curl_options' => [
