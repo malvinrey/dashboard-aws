@@ -4,7 +4,7 @@
 
 ### Status Summary
 
-Berdasarkan analisis menyeluruh pada source code, berikut adalah status implementasi SCADA Dashboard:
+Berdasarkan analisis menyeluruh pada source code terkini, berikut adalah status implementasi SCADA Dashboard:
 
 | Component                    | Status         | Version | Notes                             |
 | ---------------------------- | -------------- | ------- | --------------------------------- |
@@ -57,7 +57,7 @@ Berdasarkan analisis menyeluruh pada source code, berikut adalah status implemen
 
 -   **Laravel Infrastructure**: ✅ Complete (events, services, config)
 -   **Soketi Server**: ❌ Not running (needs startup)
--   **JavaScript Client**: ✅ Ready
+-   **JavaScript Client**: ✅ Ready (Laravel Echo + Pusher.js)
 -   **Livewire Integration**: ✅ Ready
 
 **Current Issue**:
@@ -136,6 +136,26 @@ start-all-services-fixed.bat
 -   Performance monitoring dan optimization
 -   Enterprise-grade real-time system
 
+#### 8. [08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md](08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md)
+
+#### 9. [09_MIGRATION_SOKETI_TO_REVERB.md](09_MIGRATION_SOKETI_TO_REVERB.md)
+
+#### 10. [10_REVERB_QUICK_START.md](10_REVERB_QUICK_START.md)
+
+**Status**: ✅ **IMPLEMENTED**
+
+-   **Critical Issue**: Port 6001 tidak terbaca (Soketi server not running)
+-   **Root Cause**: Service startup script tidak berhasil menjalankan Soketi
+-   **Solution**: Enhanced startup scripts + WebSocket client improvements
+-   **Status**: Ready for testing
+
+**Key Features**:
+
+-   Comprehensive troubleshooting guide untuk WebSocket issues
+-   Enhanced startup script `start-all-services-fixed.bat`
+-   Step-by-step debugging procedures
+-   Common error scenarios dan solutions
+
 ### 🚀 Quick Start Guide
 
 #### Step 1: Start All Services
@@ -179,13 +199,17 @@ http://localhost:8000
 
 ### 🔧 Current Issues & Solutions
 
-#### Issue 1: WebSocket Connection Failed
+#### Issue 1: WebSocket Connection Failed (Critical Issue 🚨)
 
 **Problem**: `WebSocket connection to 'ws://127.0.0.1:6001/... failed`
 
-**Root Cause**: Soketi server not running
+**Root Cause**: Soketi server not running - Port 6001 tidak terbaca
 
-**Solution**: Run `start-all-services-fixed.bat`
+**Solution**: Enhanced startup script `start-all-services-fixed.bat`
+
+**Status**: ✅ **SOLUTION IMPLEMENTED** - Ready for testing
+
+**Documentation**: [08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md](08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md)
 
 #### Issue 2: Performance with Large Datasets
 
@@ -244,6 +268,7 @@ http://localhost:8000
 2. **Test WebSocket**: Verify connection at test page
 3. **Verify Real-time**: Check dashboard updates
 4. **Test Performance**: Verify throttling dan queue working
+5. **Troubleshoot Issues**: Use [08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md](08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md)
 
 #### Short Term (This Week)
 
@@ -251,6 +276,7 @@ http://localhost:8000
 2. **Error Monitoring**: Check logs untuk issues
 3. **User Testing**: Validate semua fitur berfungsi
 4. **Fine-tuning**: Adjust throttling parameters if needed
+5. **WebSocket Monitoring**: Monitor connection stability
 
 #### Long Term (Next Month)
 
@@ -258,6 +284,7 @@ http://localhost:8000
 2. **Monitoring Setup**: Implement comprehensive monitoring
 3. **Backup Strategy**: Setup automated backups
 4. **Documentation Updates**: Keep docs in sync with code
+5. **WebSocket Optimization**: Performance tuning dan scaling
 
 #### Future (Q1-Q3 2025)
 
@@ -265,6 +292,7 @@ http://localhost:8000
 2. **Performance Enhancement**: <100ms latency, 60fps updates
 3. **Scalability**: Support 1000+ concurrent users
 4. **Enterprise Features**: Advanced chart capabilities
+5. **WebSocket Security**: SSL/TLS dan authentication
 
 ### 📝 Maintenance Notes
 
@@ -300,6 +328,14 @@ http://localhost:8000
 5. **Queue Issues**: Verify queue workers running
 6. **Throttling Issues**: Check ChartThrottler initialization
 
+#### WebSocket Specific Issues
+
+1. **Port 6001 Not Listening**: Run `start-all-services-fixed.bat`
+2. **Soketi Server Not Starting**: Check Node.js version (18+) dan package installation
+3. **Redis Connection Failed**: Start Redis server dan verify connection
+4. **CORS Issues**: Check `soketi.json` configuration
+5. **Laravel Echo Not Working**: Verify Pusher.js dan Echo libraries loaded
+
 #### Debug Commands
 
 ```bash
@@ -314,6 +350,11 @@ php artisan queue:failed
 
 # Check queue status
 php artisan queue:work --once --verbose
+
+# WebSocket specific
+netstat -an | findstr ":6001"  # Check Soketi port
+tasklist | findstr node        # Check Soketi process
+npm list @soketi/soketi       # Check package installation
 ```
 
 #### Performance Debug
@@ -326,6 +367,15 @@ console.log(window.performanceTracker.metrics);
 
 // Force buffer flush
 window.dataBuffer.flush();
+
+// WebSocket status check
+if (window.Echo) {
+    console.log("Echo available:", window.Echo);
+    console.log(
+        "Connection state:",
+        window.Echo.connector.pusher.connection.state
+    );
+}
 ```
 
 ### 📞 Support Information
@@ -346,6 +396,8 @@ window.dataBuffer.flush();
 -   **Test Page**: `public/test-websocket-client.html`
 -   **Documentation**: `docs/` folder
 -   **Performance Scripts**: `scripts/monitor-queue-status.ps1`
+-   **WebSocket Client**: `public/js/scada-websocket-client.js`
+-   **Troubleshooting**: `docs/08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md`
 
 #### Performance Solutions
 
@@ -353,6 +405,15 @@ window.dataBuffer.flush();
 -   **Queue Jobs**: `app/Jobs/ProcessScadaDataJob.php`
 -   **Queue Monitoring**: `scripts/monitor-queue-status.ps1`
 -   **Performance Tests**: `scripts/test_queue_implementation.php`
+-   **WebSocket Client**: `public/js/scada-websocket-client.js`
+
+#### WebSocket Solutions
+
+-   **Soketi Configuration**: `soketi.json`
+-   **Broadcasting Config**: `config/broadcasting.php`
+-   **Startup Script**: `start-all-services-fixed.bat`
+-   **Troubleshooting Guide**: `docs/08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md`
+-   **Test Pages**: `public/test-websocket-client.html`, `public/test-websocket-fix.html`
 
 #### Upgrade Planning
 
@@ -367,6 +428,12 @@ window.dataBuffer.flush();
 **Documentation Version**: 1.0.0
 **System Status**: 🟡 **PARTIALLY OPERATIONAL** (WebSocket needs startup)
 **Performance Status**: ✅ **FULLY OPTIMIZED** (Throttling + Queue working)
+**WebSocket Status**: 🟡 **INFRASTRUCTURE READY** - Soketi server needs startup
+**Troubleshooting Status**: ✅ **COMPLETE** - Comprehensive guide available
 **Next Action**: Run `start-all-services-fixed.bat` to complete setup
 **Chart Library**: Plotly.js 2.32.0 (Real-time ready)
 **Upgrade Plan**: 📋 **READY** - WebSocket + Soketi upgrade planned
+**Package Dependencies**: ✅ **COMPLETE** - @soketi/soketi v1.6.1, laravel-echo v1.15.3, pusher-js v8.4.0
+**Critical Issue**: 🚨 **SOKETI SERVER NOT RUNNING** - Port 6001 not accessible
+**Solution Status**: ✅ **IMPLEMENTED** - Enhanced startup scripts + WebSocket client
+**Troubleshooting Guide**: 📖 **AVAILABLE** - [08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md](08_WEBSOCKET_SOKETI_TROUBLESHOOTING.md)

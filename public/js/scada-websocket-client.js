@@ -1,154 +1,121 @@
 /**
- * SCADA WebSocket Client (Vanilla JS)
- * Implementasi ini fokus pada koneksi WebSocket standar yang stabil dengan
- * reconnect logic dan heartbeat.
+ * SCADA WebSocket Client untuk komunikasi real-time.
+ * Versi ini menggunakan Laravel Echo & Pusher.js untuk kompatibilitas penuh
+ * dengan server Soketi dan Livewire.
  */
 class ScadaWebSocketClient {
-    constructor(options = {}) {
-        this.options = {
-            url: options.url || "ws://127.0.0.1:6001/",
-            reconnectAttempts: options.reconnectAttempts || 10,
-            reconnectDelay: options.reconnectDelay || 2000,
-            heartbeatInterval: options.heartbeatInterval || 30000,
-            ...options,
+    constructor(config = {}) {
+        this.config = {
+            host: config.host || "127.0.0.1",
+            port: config.port || 6001,
+            appKey: config.appKey || "scada_dashboard_key_2024",
+            cluster: config.cluster || "mt1",
+            forceTLS: config.forceTLS || false,
+            onConnect: config.onConnect || (() => {}),
+            onMessage: config.onMessage || (() => {}),
+            onError: config.onError || (() => {}),
+            onDisconnect: config.onDisconnect || (() => {}),
         };
 
-        this.ws = null;
-        this.reconnectAttempts = 0;
-        this.reconnectTimer = null;
-        this.heartbeatTimer = null;
-        this.channelHandlers = new Map(); // Untuk menyimpan callback per channel
-
-        // Bind event handlers agar 'this' merujuk ke instance class
-        this.onOpen = this.onOpen.bind(this);
-        this.onMessage = this.onMessage.bind(this);
-        this.onClose = this.onClose.bind(this);
-        this.onError = this.onError.bind(this);
-
-        this.connect();
+        this.initializeEcho(); // Langsung inisialisasi Echo
     }
 
-    connect() {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            console.log("WebSocket is already connected.");
+    /**
+     * Menginisialisasi instance Laravel Echo yang sesungguhnya.
+     */
+    initializeEcho() {
+        if (typeof Pusher === "undefined" || typeof Echo === "undefined") {
+            console.error(
+                "Pusher.js atau Laravel Echo tidak termuat. Inisialisasi dibatalkan."
+            );
             return;
         }
 
-        console.log(`Connecting to WebSocket: ${this.options.url}`);
-        this.ws = new WebSocket(this.options.url);
+        // Cek jika Echo sudah ada dan berfungsi, jangan buat lagi.
+        if (window.Echo && typeof window.Echo.socketId === "function") {
+            console.log("Laravel Echo sudah diinisialisasi.");
+            this.bindEvents(); // Cukup ikat event-nya saja
+            return;
+        }
 
-        this.ws.onopen = this.onOpen;
-        this.ws.onmessage = this.onMessage;
-        this.ws.onclose = this.onClose;
-        this.ws.onerror = this.onError;
+        console.log("Menginisialisasi instance Laravel Echo baru...");
+        try {
+            window.Echo = new Echo({
+                broadcaster: "pusher",
+                key: this.config.appKey,
+                cluster: this.config.cluster,
+                wsHost: this.config.host,
+                wsPort: this.config.port,
+                wssPort: this.config.port,
+                forceTLS: this.config.forceTLS,
+                enabledTransports: ["ws", "wss"],
+                disableStats: true,
+            });
+
+            this.bindEvents();
+            console.log("Instance Laravel Echo berhasil diinisialisasi.");
+        } catch (e) {
+            console.error("Gagal menginisialisasi Laravel Echo:", e);
+            if (typeof this.config.onError === "function") {
+                this.config.onError(e);
+            }
+        }
     }
 
-    onOpen(event) {
-        console.log("✅ WebSocket connection established.");
-        this.reconnectAttempts = 0;
-        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    /**
+     * Mengikat (bind) event-event koneksi ke instance Pusher di dalam Echo.
+     */
+    bindEvents() {
+        const pusher = window.Echo.connector.pusher;
 
-        // Kirim pesan subscribe untuk semua channel yang sudah terdaftar
-        this.channelHandlers.forEach((_, channelKey) => {
-            const [channelName] = channelKey.split(":");
-            this.subscribe(channelName);
+        pusher.connection.bind("connected", () => {
+            console.log(
+                "✅ Berhasil terhubung ke server WebSocket via Echo/Pusher."
+            );
+            if (typeof this.config.onConnect === "function") {
+                this.config.onConnect();
+            }
         });
 
-        this.startHeartbeat();
-        if (this.options.onConnect) this.options.onConnect(event);
-    }
-
-    onMessage(event) {
-        try {
-            const data = JSON.parse(event.data);
-
-            // Logika untuk menangani pesan PUSHER dari SOKETI
-            if (data.event && data.channel) {
-                const channelKey = `${data.channel}:${data.event}`;
-                if (this.channelHandlers.has(channelKey)) {
-                    const payload = JSON.parse(data.data); // Data dari Pusher biasanya stringified JSON
-                    this.channelHandlers.get(channelKey)(payload);
-                }
-            } else {
-                // Fallback untuk pesan non-pusher
-                if (this.options.onMessage) this.options.onMessage(data);
+        pusher.connection.bind("disconnected", () => {
+            console.warn("Koneksi WebSocket terputus.");
+            if (typeof this.config.onDisconnect === "function") {
+                this.config.onDisconnect();
             }
-        } catch (e) {
-            console.error("Failed to parse WebSocket message:", e);
-        }
+        });
+
+        pusher.connection.bind("error", (error) => {
+            console.error("Error koneksi WebSocket:", error);
+            if (typeof this.config.onError === "function") {
+                this.config.onError(error);
+            }
+        });
     }
 
-    onClose(event) {
-        console.warn(`WebSocket connection closed: ${event.code}`);
-        this.stopHeartbeat();
-        if (this.options.onDisconnect) this.options.onDisconnect(event);
-        this.scheduleReconnect();
-    }
-
-    onError(event) {
-        console.error("WebSocket error:", event);
-        if (this.options.onError) this.options.onError(event);
-    }
-
-    scheduleReconnect() {
-        if (this.reconnectAttempts >= this.options.reconnectAttempts) {
-            console.error("Max reconnect attempts reached. Giving up.");
+    /**
+     * Berlangganan (subscribe) ke sebuah channel dan mendengarkan event.
+     * @param {string} channelName - Nama channel.
+     * @param {string} eventName - Nama event.
+     * @param {function} callback - Fungsi yang akan dipanggil saat event diterima.
+     */
+    subscribe(channelName, eventName, callback) {
+        if (!window.Echo) {
+            console.error("Echo belum diinisialisasi. Tidak bisa subscribe.");
             return;
         }
-        this.reconnectAttempts++;
-        const delay = Math.min(
-            this.options.reconnectDelay * this.reconnectAttempts,
-            30000
-        );
+
         console.log(
-            `Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`
+            `Subscribe ke channel: ${channelName}, event: ${eventName}`
         );
-        this.reconnectTimer = setTimeout(() => this.connect(), delay);
+        window.Echo.channel(channelName).listen(eventName, callback);
     }
 
-    startHeartbeat() {
-        this.stopHeartbeat(); // Hentikan timer lama jika ada
-        this.heartbeatTimer = setInterval(() => {
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                // Soketi/Pusher mengharapkan ping dalam format tertentu
-                this.ws.send(
-                    JSON.stringify({ event: "pusher:ping", data: {} })
-                );
-            }
-        }, this.options.heartbeatInterval);
-    }
-
-    stopHeartbeat() {
-        if (this.heartbeatTimer) {
-            clearInterval(this.heartbeatTimer);
-            this.heartbeatTimer = null;
-        }
-    }
-
-    // Metode untuk subscribe ke channel
-    subscribe(channel, event, callback) {
-        const channelKey = `${channel}:${event}`;
-        this.channelHandlers.set(channelKey, callback);
-
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(
-                JSON.stringify({
-                    event: "pusher:subscribe",
-                    data: {
-                        channel: channel,
-                        auth: null,
-                    },
-                })
-            );
-            console.log(`Sent subscription request for channel: ${channel}`);
-        }
-    }
-
+    /**
+     * Memutuskan koneksi WebSocket.
+     */
     disconnect() {
-        this.stopHeartbeat();
-        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-        if (this.ws) {
-            this.ws.close();
+        if (window.Echo) {
+            window.Echo.disconnect();
         }
     }
 }

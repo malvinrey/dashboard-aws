@@ -4,15 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCADA WebSocket Test</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>SCADA WebSocket Test - Laravel Reverb</title>
 
-    <!-- Include Pusher, Laravel Echo, and SCADA WebSocket Client -->
-    <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
-    <script>
-        window.Pusher = Pusher;
-    </script>
-    <script src="https://unpkg.com/laravel-echo/dist/echo.iife.js"></script>
-    <script src="{{ asset('js/scada-websocket-client.js') }}"></script>
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 
     <style>
         body {
@@ -181,32 +176,6 @@
             font-size: 0.9em;
         }
 
-        .chart-container {
-            background: white;
-            border: 1px solid #e9ecef;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 30px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-        }
-
-        .chart-container h3 {
-            margin: 0 0 20px 0;
-            color: #495057;
-        }
-
-        #realtimeChart {
-            width: 100%;
-            height: 400px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #6c757d;
-            font-size: 1.1em;
-        }
-
         .logs-section {
             background: white;
             border: 1px solid #e9ecef;
@@ -285,8 +254,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔌 SCADA WebSocket Test</h1>
-            <p>Real-time data streaming via WebSocket connection</p>
+            <h1>🔌 SCADA WebSocket Test - Laravel Reverb</h1>
+            <p>Real-time data streaming via Laravel Reverb WebSocket server</p>
         </div>
 
         <div class="content">
@@ -298,8 +267,9 @@
                     <span id="statusText">Disconnected</span>
                 </div>
                 <div style="margin-top: 10px;">
-                    <strong>Server:</strong> <span id="serverInfo">ws://127.0.0.1:6001</span><br>
-                    <strong>Channels:</strong> <span id="channelsInfo">None</span>
+                    <strong>Server:</strong> <span id="serverInfo">ws://127.0.0.1:8080</span><br>
+                    <strong>Channels:</strong> <span id="channelsInfo">None</span><br>
+                    <strong>Broadcaster:</strong> <span id="broadcasterInfo">Laravel Reverb</span>
                 </div>
             </div>
 
@@ -342,14 +312,6 @@
                 </div>
             </div>
 
-            <!-- Chart -->
-            <div class="chart-container">
-                <h3>📈 Real-time Chart</h3>
-                <div id="realtimeChart">
-                    Chart will appear here when data is received
-                </div>
-            </div>
-
             <!-- Message Logs -->
             <div class="logs-section">
                 <h3>📝 Message Logs</h3>
@@ -360,15 +322,16 @@
     </div>
 
     <script>
-        let wsClient = null;
-        let chartData = [];
+        let echo = null;
+        let isConnected = false;
+        let dataCount = 0;
 
         // Fungsi untuk menambahkan log ke UI
-        function addLog(message, type = 'log') {
+        function addLog(message, type = 'info') {
             const log = document.getElementById('messageLog');
             const entry = document.createElement('div');
-            entry.className = `log-entry ${type}`;
-            entry.innerHTML = `<span>${new Date().toLocaleTimeString()}</span> - ${message}`;
+            entry.className = `log-entry log-${type}`;
+            entry.innerHTML = `<span class="timestamp">${new Date().toLocaleTimeString()}</span> - ${message}`;
             log.appendChild(entry);
             log.scrollTop = log.scrollHeight;
         }
@@ -382,60 +345,122 @@
                 status.className = `status-indicator status-${state}`;
                 statusText.textContent = text;
             }
+
+            // Update button states
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const subscribeBtn = document.getElementById('subscribeBtn');
+            const testDataBtn = document.getElementById('testDataBtn');
+
+            if (state === 'connected') {
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                subscribeBtn.disabled = false;
+                testDataBtn.disabled = false;
+            } else {
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                subscribeBtn.disabled = true;
+                testDataBtn.disabled = true;
+            }
         }
 
-        // Fungsi utama untuk menginisialisasi koneksi WebSocket
-        function initializeWebSocket() {
-            addLog('Initializing WebSocket...', 'info');
+        // Fungsi untuk menginisialisasi Laravel Echo
+        function initializeEcho() {
+            addLog('Initializing Laravel Echo with Reverb...', 'info');
 
-            wsClient = new ScadaWebSocketClient({
-                onConnect: () => {
-                    updateStatus('connected', 'Connected');
-                    addLog('Successfully connected to WebSocket server!', 'success');
+            try {
+                // Echo sudah diinisialisasi di bootstrap.js
+                if (window.Echo) {
+                    echo = window.Echo;
+                    addLog('Laravel Echo initialized successfully', 'success');
+                    updateStatus('connected', 'Connected to Reverb');
+                    isConnected = true;
 
-                    // Setelah terhubung, subscribe ke channel yang diinginkan
-                    const channelName = 'scada-channel';
-                    const eventName = 'scada.data.received';
-                    addLog(`Subscribing to channel "${channelName}" for event "${eventName}"...`);
+                    // Update server info
+                    document.getElementById('serverInfo').textContent = 'ws://127.0.0.1:8080';
+                    document.getElementById('broadcasterInfo').textContent = 'Laravel Reverb';
 
-                    wsClient.subscribe(channelName, eventName, (data) => {
-                        addLog(`Received data: ${JSON.stringify(data)}`, 'data');
-                        processData(data);
-                    });
-                },
-                onDisconnect: () => {
-                    updateStatus('disconnected', 'Disconnected');
-                    addLog('WebSocket connection lost.', 'error');
-                },
-                onError: (error) => {
-                    addLog(`WebSocket error: ${error.message || 'An unknown error occurred'}`, 'error');
+                    return true;
+                } else {
+                    addLog('Error: Laravel Echo not found. Check bootstrap.js configuration.', 'error');
+                    updateStatus('error', 'Echo not found');
+                    return false;
                 }
-            });
+            } catch (error) {
+                addLog(`Error initializing Echo: ${error.message}`, 'error');
+                updateStatus('error', 'Initialization failed');
+                return false;
+            }
         }
 
         // Fungsi untuk memulai koneksi dari tombol
         function connectWebSocket() {
-            if (wsClient) {
-                addLog('Already connected or connecting.', 'warn');
+            if (isConnected) {
+                addLog('Already connected.', 'warn');
                 return;
             }
-            initializeWebSocket();
+
+            if (initializeEcho()) {
+                addLog('Successfully connected to Laravel Reverb!', 'success');
+            }
         }
 
         // Fungsi untuk memutus koneksi dari tombol
         function disconnectWebSocket() {
-            if (wsClient) {
-                wsClient.disconnect();
-                wsClient = null;
-                updateStatus('disconnected', 'Disconnected by user');
-                addLog('Disconnected by user.', 'info');
+            if (echo) {
+                try {
+                    // Unsubscribe dari semua channel
+                    echo.disconnect();
+                    echo = null;
+                    isConnected = false;
+                    updateStatus('disconnected', 'Disconnected by user');
+                    addLog('Disconnected from Reverb.', 'info');
+                } catch (error) {
+                    addLog(`Error disconnecting: ${error.message}`, 'error');
+                }
             } else {
                 addLog('Not connected.', 'warn');
             }
         }
 
+        // Fungsi untuk subscribe ke channels
+        function subscribeChannels() {
+            if (!echo || !isConnected) {
+                addLog('Not connected. Please connect first.', 'warn');
+                return;
+            }
+
+            try {
+                // Subscribe ke channel SCADA
+                const channel = echo.channel('scada-channel');
+
+                channel.listen('ScadaDataReceived', (e) => {
+                    addLog(`Received SCADA data: ${JSON.stringify(e)}`, 'success');
+                    processData(e);
+                });
+
+                // Subscribe ke private channel jika diperlukan
+                const privateChannel = echo.private('scada-private');
+
+                privateChannel.listen('ScadaDataReceived', (e) => {
+                    addLog(`Received private SCADA data: ${JSON.stringify(e)}`, 'success');
+                    processData(e);
+                });
+
+                addLog('Subscribed to SCADA channels successfully', 'success');
+                document.getElementById('channelsInfo').textContent = 'scada-channel, scada-private';
+
+            } catch (error) {
+                addLog(`Error subscribing to channels: ${error.message}`, 'error');
+            }
+        }
+
         // Proses data yang diterima
         function processData(data) {
+            dataCount++;
+            document.getElementById('dataCount').textContent = dataCount;
+
             // Update real-time values jika ada
             if (data.temperature !== undefined) {
                 const tempElement = document.getElementById('temperatureValue');
@@ -449,62 +474,6 @@
                 const pressElement = document.getElementById('pressureValue');
                 if (pressElement) pressElement.textContent = data.pressure.toFixed(1);
             }
-
-            // Add to chart data
-            addChartData(data);
-        }
-
-        // Add data to chart
-        function addChartData(data) {
-            const timestamp = new Date().getTime();
-            chartData.push({
-                timestamp: timestamp,
-                temperature: data.temperature || 0,
-                humidity: data.humidity || 0,
-                pressure: data.pressure || 0
-            });
-
-            // Keep only last 50 points
-            if (chartData.length > 50) {
-                chartData.shift();
-            }
-
-            // Update chart display
-            updateChartDisplay();
-        }
-
-        // Update chart display
-        function updateChartDisplay() {
-            const chart = document.getElementById('realtimeChart');
-            if (!chart) return;
-
-            if (chartData.length === 0) {
-                chart.innerHTML = 'Chart will appear here when data is received';
-                return;
-            }
-
-            let chartHtml = '<div style="padding: 20px;">';
-            chartHtml += '<h4>Recent Data Points</h4>';
-            chartHtml += '<div style="max-height: 300px; overflow-y: auto;">';
-
-            chartData.slice(-10).reverse().forEach((point, index) => {
-                const time = new Date(point.timestamp).toLocaleTimeString();
-                chartHtml += `
-                    <div style="border-bottom: 1px solid #eee; padding: 8px 0;">
-                        <strong>${time}</strong><br>
-                        T: ${point.temperature}°C | H: ${point.humidity}% | P: ${point.pressure}hPa
-                    </div>
-                `;
-            });
-
-            chartHtml += '</div></div>';
-            chart.innerHTML = chartHtml;
-        }
-
-        // Clear logs
-        function clearLogs() {
-            const log = document.getElementById('messageLog');
-            if (log) log.innerHTML = '';
         }
 
         // Send test data via API
@@ -520,7 +489,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                     },
                     body: JSON.stringify(testData)
                 })
@@ -533,9 +502,26 @@
                 });
         }
 
+        // Clear logs
+        function clearLogs() {
+            const log = document.getElementById('messageLog');
+            if (log) log.innerHTML = '';
+        }
+
+        // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
-            addLog('Page loaded, ready to connect.', 'info');
+            addLog('Page loaded, ready to connect to Laravel Reverb.', 'info');
             updateStatus('disconnected', 'Disconnected');
+
+            // Auto-connect jika Echo tersedia
+            setTimeout(() => {
+                if (window.Echo) {
+                    addLog('Auto-connecting to Reverb...', 'info');
+                    connectWebSocket();
+                } else {
+                    addLog('Laravel Echo not available. Check console for errors.', 'warning');
+                }
+            }, 1000);
         });
     </script>
 </body>

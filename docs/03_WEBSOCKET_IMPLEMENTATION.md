@@ -4,7 +4,7 @@
 
 ### Overview
 
-WebSocket infrastructure sudah diimplementasi di level Laravel (events, services, configuration) tetapi **Soketi server belum running**. Ini menyebabkan error `WebSocket connection to 'ws://127.0.0.1:6001/... failed`.
+WebSocket infrastructure sudah diimplementasi di level Laravel (events, services, configuration) dan JavaScript client sudah siap dengan Laravel Echo + Pusher.js, tetapi **Soketi server belum running**. Ini menyebabkan error `WebSocket connection to 'ws://127.0.0.1:6001/... failed`.
 
 ### ✅ **IMPLEMENTED COMPONENTS**
 
@@ -62,28 +62,76 @@ class ScadaBroadcastingService
 ],
 ```
 
-#### 4. WebSocket Client JavaScript
+#### 4. WebSocket Client JavaScript (Updated)
 
 ```javascript
 // public/js/scada-websocket-client.js
 class ScadaWebSocketClient {
-    constructor(options = {}) {
-        this.options = {
-            url: "ws://127.0.0.1:6001/app/scada_dashboard_key_2024",
-            reconnectAttempts: 10,
-            reconnectDelay: 1000,
-            heartbeatInterval: 30000,
+    constructor(config = {}) {
+        this.config = {
+            host: config.host || "127.0.0.1",
+            port: config.port || 6001,
+            appKey: config.appKey || "scada_dashboard_key_2024",
+            cluster: config.cluster || "mt1",
+            forceTLS: config.forceTLS || false,
+            onConnect: config.onConnect || (() => {}),
+            onMessage: config.onMessage || (() => {}),
+            onError: config.onError || (() => {}),
+            onDisconnect: config.onDisconnect || (() => {}),
         };
+
+        this.initializeEcho(); // Langsung inisialisasi Echo
     }
 
-    connect() {
-        /* ... */
+    initializeEcho() {
+        if (typeof Pusher === "undefined" || typeof Echo === "undefined") {
+            console.error(
+                "Pusher.js atau Laravel Echo tidak termuat. Inisialisasi dibatalkan."
+            );
+            return;
+        }
+
+        // Cek jika Echo sudah ada dan berfungsi, jangan buat lagi.
+        if (window.Echo && typeof window.Echo.socketId === "function") {
+            console.log("Laravel Echo sudah diinisialisasi.");
+            this.bindEvents(); // Cukup ikat event-nya saja
+            return;
+        }
+
+        console.log("Menginisialisasi instance Laravel Echo baru...");
+        try {
+            window.Echo = new Echo({
+                broadcaster: "pusher",
+                key: this.config.appKey,
+                cluster: this.config.cluster,
+                wsHost: this.config.host,
+                wsPort: this.config.port,
+                wssPort: this.config.port,
+                forceTLS: this.config.forceTLS,
+                enabledTransports: ["ws", "wss"],
+                disableStats: true,
+            });
+
+            this.bindEvents();
+            console.log("Instance Laravel Echo berhasil diinisialisasi.");
+        } catch (e) {
+            console.error("Gagal menginisialisasi Laravel Echo:", e);
+            if (typeof this.config.onError === "function") {
+                this.config.onError(e);
+            }
+        }
     }
-    subscribe(channel) {
-        /* ... */
-    }
-    send(message) {
-        /* ... */
+
+    subscribe(channelName, eventName, callback) {
+        if (!window.Echo) {
+            console.error("Echo belum diinisialisasi. Tidak bisa subscribe.");
+            return;
+        }
+
+        console.log(
+            `Subscribe ke channel: ${channelName}, event: ${eventName}`
+        );
+        window.Echo.channel(channelName).listen(eventName, callback);
     }
 }
 ```
@@ -109,7 +157,7 @@ class AnalysisChart extends Component
 
 #### Current Status
 
--   **Soketi Package**: ✅ Installed (`npm install @soketi/soketi`)
+-   **Soketi Package**: ✅ Installed (`@soketi/soketi v1.6.1`)
 -   **Soketi Server**: ❌ Not running
 -   **Port 6001**: ❌ Not listening
 -   **WebSocket Connection**: ❌ Failed
@@ -120,45 +168,39 @@ class AnalysisChart extends Component
 WebSocket connection to 'ws://127.0.0.1:6001/app/scada_dashboard_key_2024' failed
 ```
 
-### 🚀 **SOLUTION: START SOKETI SERVER**
+### 🚨 **PERMASALAHAN SOKETI YANG DITEMUKAN**
 
-#### Step 1: Use Fixed Startup Scripts
+#### 1. Port 6001 Tidak Terbaca
 
-```cmd
-# Option 1: Simple WebSocket Services
-start-websocket-services.bat
+**Problem**: Meskipun konfigurasi `soketi.json` sudah benar dengan port 6001, server Soketi tidak bisa diakses di port tersebut.
 
-# Option 2: All Services (Recommended)
-start-all-services-fixed.bat
+**Root Cause Analysis**:
 
-# Option 3: PowerShell
-.\scripts\start-all-services-fixed.ps1
-```
+-   Soketi server tidak running
+-   Port 6001 tidak listening
+-   Service startup script tidak berhasil menjalankan Soketi
 
-#### Step 2: Verify Soketi is Running
+#### 2. Dependensi Package
 
-```cmd
-# Check if port 6001 is listening
-netstat -an | findstr :6001
-
-# Check if Soketi process is running
-tasklist | findstr node
-```
-
-#### Step 3: Test WebSocket Connection
-
-Buka browser dan akses:
-
-```
-http://localhost:8000/test-websocket-client.html
-```
-
-### 🔧 **CONFIGURATION FILES**
-
-#### 1. Soketi Configuration
+**Current Dependencies** (dari `package.json`):
 
 ```json
-// soketi.json
+{
+    "dependencies": {
+        "@soketi/soketi": "^1.6.1",
+        "laravel-echo": "^1.15.3",
+        "pusher-js": "^8.4.0"
+    }
+}
+```
+
+**Status**: ✅ **COMPLETE** - Semua package sudah terinstall dengan versi terbaru
+
+#### 3. Konfigurasi Soketi
+
+**File**: `soketi.json`
+
+```json
 {
     "appId": "12345",
     "appKey": "scada_dashboard_key_2024",
@@ -172,33 +214,118 @@ http://localhost:8000/test-websocket-client.html
             "password": null,
             "db": 0
         }
-    },
-    "cors": {
-        "origin": ["http://localhost:8000", "http://127.0.0.1:8000"],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allowedHeaders": [
-            "Content-Type",
-            "X-Requested-With",
-            "Authorization",
-            "X-CSRF-TOKEN"
-        ]
     }
 }
 ```
 
-#### 2. Environment Variables
+**Status**: ✅ **CORRECT** - Konfigurasi sudah benar
 
-```env
-# .env
-BROADCAST_DRIVER=pusher
-PUSHER_APP_ID=12345
-PUSHER_APP_KEY=scada_dashboard_key_2024
-PUSHER_APP_SECRET=scada_dashboard_secret_2024
-PUSHER_APP_CLUSTER=mt1
-PUSHER_HOST=127.0.0.1
-PUSHER_PORT=6001
-PUSHER_SCHEME=http
-PUSHER_APP_ENCRYPTED=false
+### 🚀 **SOLUTION: START SOKETI SERVER**
+
+#### Step 1: Use Fixed Startup Scripts
+
+```cmd
+# Option 1: All Services (Recommended)
+start-all-services-fixed.bat
+
+# Option 2: WebSocket Services Only
+start-websocket-services.bat
+
+# Option 3: PowerShell
+.\scripts\start-all-services-fixed.ps1
+```
+
+#### Step 2: Verify Soketi is Running
+
+```cmd
+# Check if port 6001 is listening
+netstat -an | findstr :6001
+
+# Check if Soketi process is running
+tasklist | findstr node
+
+# Check Soketi executable
+dir node_modules\.bin\soketi*
+```
+
+#### Step 3: Test WebSocket Connection
+
+Buka browser dan akses:
+
+```
+http://localhost:8000/test-websocket-client.html
+```
+
+### 🔧 **TROUBLESHOOTING SOKETI**
+
+#### 1. Soketi Not Starting
+
+**Problem**: Server Soketi tidak bisa dijalankan
+
+**Debug Steps**:
+
+```bash
+# Check if Soketi is installed
+ls node_modules\.bin\soketi*
+
+# Reinstall if needed
+npm install @soketi/soketi
+
+# Check Node.js version (requires Node.js 18+)
+node --version
+
+# Try manual start
+cd node_modules\.bin
+./soketi start --config=../../soketi.json
+```
+
+#### 2. Port Already in Use
+
+**Problem**: Port 6001 sudah digunakan oleh aplikasi lain
+
+**Debug Steps**:
+
+```bash
+# Check what's using port 6001
+netstat -ano | findstr :6001
+
+# Kill the process
+taskkill /f /pid <PID>
+
+# Alternative: Use different port
+# Edit soketi.json and change port to 6002
+```
+
+#### 3. Redis Connection Issues
+
+**Problem**: Soketi tidak bisa connect ke Redis
+
+**Debug Steps**:
+
+```bash
+# Check Redis status
+redis-cli ping
+
+# Start Redis if needed
+redis-server --port 6379
+
+# Check Redis connection from Soketi
+redis-cli -h 127.0.0.1 -p 6379 ping
+```
+
+#### 4. Permission Issues
+
+**Problem**: Soketi tidak bisa bind ke port 6001
+
+**Debug Steps**:
+
+```bash
+# Run as Administrator
+# Check Windows Firewall
+# Check antivirus blocking
+
+# Alternative: Use higher port (>1024)
+# Edit soketi.json: "port": 8080
 ```
 
 ### 📊 **WEB SOCKET CHANNELS**
@@ -243,7 +370,7 @@ ScadaDataReceived::dispatch($scadaData, 'scada-data');
 
 ```bash
 # Start Soketi manually
-cd node_modules/.bin
+cd node_modules\.bin
 ./soketi start --config=../../soketi.json
 ```
 
@@ -262,39 +389,16 @@ ws.onopen = () => console.log("Connected!");
 ws.onmessage = (event) => console.log("Message:", event.data);
 ```
 
-### 🚨 **TROUBLESHOOTING**
+#### 4. Laravel Echo Test
 
-#### 1. Soketi Not Starting
-
-```bash
-# Check if Soketi is installed
-ls node_modules/.bin/soketi*
-
-# Reinstall if needed
-npm install @soketi/soketi
-
-# Check Node.js version (requires Node.js 18+)
-node --version
-```
-
-#### 2. Port Already in Use
-
-```bash
-# Check what's using port 6001
-netstat -ano | findstr :6001
-
-# Kill the process
-taskkill /f /pid <PID>
-```
-
-#### 3. Redis Connection Issues
-
-```bash
-# Check Redis status
-redis-cli ping
-
-# Start Redis if needed
-redis-server --port 6379
+```javascript
+// Test Laravel Echo
+if (window.Echo) {
+    console.log("Echo available:", window.Echo);
+    window.Echo.channel("scada-data").listen("scada.data.received", (e) => {
+        console.log("Data received:", e);
+    });
+}
 ```
 
 ### 📈 **PERFORMANCE FEATURES**
@@ -325,9 +429,38 @@ redis-server --port 6379
 -   **Logging**: Comprehensive WebSocket logging
 -   **Health Checks**: Connection health monitoring
 
+### 📋 **CHECKLIST STARTUP SOKETI**
+
+#### Pre-Startup Checks
+
+-   [ ] Node.js 18+ installed
+-   [ ] Redis server running on port 6379
+-   [ ] `@soketi/soketi` package installed
+-   [ ] `soketi.json` configuration correct
+-   [ ] Port 6001 available
+
+#### Startup Steps
+
+-   [ ] Run `start-all-services-fixed.bat`
+-   [ ] Check Soketi process running
+-   [ ] Verify port 6001 listening
+-   [ ] Test WebSocket connection
+-   [ ] Verify Laravel Echo working
+
+#### Post-Startup Verification
+
+-   [ ] WebSocket test page accessible
+-   [ ] Browser console shows "Connected!"
+-   [ ] Real-time data flowing
+-   [ ] No connection errors
+-   [ ] Performance monitoring active
+
 ---
 
 **Status**: 🟡 **PARTIALLY IMPLEMENTED** - Infrastructure ready, server needs to start
 **Next Step**: Run `start-all-services-fixed.bat` to start Soketi server
 **Last Updated**: January 2025
 **Version**: 0.9.0
+**Package Dependencies**: ✅ **COMPLETE** - @soketi/soketi v1.6.1, laravel-echo v1.15.3, pusher-js v8.4.0
+**Critical Issue**: 🚨 **SOKETI SERVER NOT RUNNING** - Port 6001 not accessible
+**Solution**: Use startup script `start-all-services-fixed.bat`
