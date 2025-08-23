@@ -4,292 +4,514 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>WebSocket Fix Test</title>
+
+        <!-- Load libraries in correct order -->
+        <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.3/dist/echo.iife.js"></script>
+        <script
+            src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"
+            defer
+        ></script>
+        <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.27.0/plotly.min.js"></script>
+
         <style>
             body {
                 font-family: Arial, sans-serif;
-                max-width: 800px;
-                margin: 0 auto;
-                padding: 20px;
-                background-color: #f5f5f5;
-            }
-            .container {
-                background: white;
-                padding: 20px;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                margin: 20px;
             }
             .status {
                 padding: 10px;
-                border-radius: 4px;
                 margin: 10px 0;
-                font-weight: bold;
+                border-radius: 5px;
             }
-            .status.connected {
+            .connected {
                 background-color: #d4edda;
                 color: #155724;
             }
-            .status.disconnected {
+            .disconnected {
                 background-color: #f8d7da;
                 color: #721c24;
             }
-            .status.connecting {
-                background-color: #fff3cd;
-                color: #856404;
-            }
-            .status.error {
+            .error {
                 background-color: #f8d7da;
                 color: #721c24;
             }
-
-            .log-entry {
-                padding: 5px;
-                margin: 2px 0;
-                border-left: 3px solid #ddd;
-                padding-left: 10px;
-                font-family: monospace;
-                font-size: 12px;
-            }
-            .log-entry.success {
-                border-left-color: #28a745;
-            }
-            .log-entry.error {
-                border-left-color: #dc3545;
-            }
-            .log-entry.warn {
-                border-left-color: #ffc107;
-            }
-            .log-entry.info {
-                border-left-color: #17a2b8;
-            }
-            .log-entry.data {
-                border-left-color: #6f42c1;
-                background-color: #f8f9fa;
-            }
-
-            button {
-                background-color: #007bff;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                margin: 5px;
-                border-radius: 4px;
-                cursor: pointer;
-            }
-            button:hover {
-                background-color: #0056b3;
-            }
-            button:disabled {
-                background-color: #6c757d;
-                cursor: not-allowed;
-            }
-
-            .log-container {
+            .log {
                 background-color: #f8f9fa;
                 border: 1px solid #dee2e6;
-                border-radius: 4px;
                 padding: 10px;
+                margin: 10px 0;
                 max-height: 300px;
                 overflow-y: auto;
-                margin: 10px 0;
             }
-
-            .test-section {
-                margin: 20px 0;
-                padding: 15px;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
+            .data-item {
+                background-color: #e9ecef;
+                padding: 5px;
+                margin: 2px 0;
+                border-radius: 3px;
+            }
+            .debug-info {
+                background-color: #fff3cd;
+                border: 1px solid #ffeaa7;
+                padding: 10px;
+                margin: 10px 0;
+                border-radius: 5px;
             }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>🔧 WebSocket Fix Test</h1>
-            <p>
-                Halaman ini untuk menguji perbaikan WebSocket yang telah
-                diterapkan.
-            </p>
+        <h1>🔧 WebSocket Fix Test</h1>
 
-            <div class="test-section">
-                <h3>📡 Connection Status</h3>
-                <div id="status" class="status disconnected">Disconnected</div>
-                <button onclick="connectWebSocket()">Connect</button>
-                <button onclick="disconnectWebSocket()">Disconnect</button>
+        <div class="debug-info">
+            <strong>Debug Info:</strong>
+            <div>
+                Pusher loaded: <span id="pusher-status">Checking...</span>
             </div>
-
-            <div class="test-section">
-                <h3>📊 Test Data</h3>
-                <button onclick="sendTestData()">Send Test Data</button>
-                <p>
-                    Data test akan dikirim ke API dan seharusnya diterima
-                    melalui WebSocket.
-                </p>
-            </div>
-
-            <div class="test-section">
-                <h3>📝 Connection Logs</h3>
-                <div id="log" class="log-container"></div>
-                <button onclick="clearLogs()">Clear Logs</button>
-            </div>
-
-            <div class="test-section">
-                <h3>ℹ️ Test Instructions</h3>
-                <ol>
-                    <li>
-                        Klik tombol "Connect" untuk memulai koneksi WebSocket
-                    </li>
-                    <li>
-                        Perhatikan status koneksi berubah menjadi "Connected"
-                    </li>
-                    <li>Klik "Send Test Data" untuk mengirim data test</li>
-                    <li>
-                        Data seharusnya diterima melalui WebSocket dan
-                        ditampilkan di log
-                    </li>
-                    <li>
-                        Jika ada error, periksa console browser untuk detail
-                    </li>
-                </ol>
+            <div>Echo loaded: <span id="echo-status">Checking...</span></div>
+            <div>
+                Alpine loaded: <span id="alpine-status">Checking...</span>
             </div>
         </div>
 
-        <script src="js/scada-websocket-client.js"></script>
+        <div x-data="websocketTest()" x-init="init()">
+            <div class="status" :class="connectionStatus.class">
+                <strong>Status:</strong>
+                <span x-text="connectionStatus.text"></span>
+            </div>
+
+            <div class="status" :class="dataStatus.class">
+                <strong>Data Status:</strong>
+                <span x-text="dataStatus.text"></span>
+            </div>
+
+            <div>
+                <button @click="testConnection()" :disabled="!isConnected">
+                    Test Connection
+                </button>
+                <button @click="clearLogs()">Clear Logs</button>
+                <button @click="testDataFlow()" :disabled="!isConnected">
+                    Test Data Flow
+                </button>
+                <button @click="checkLibraries()">Check Libraries</button>
+            </div>
+
+            <div class="log">
+                <h3>Connection Logs:</h3>
+                <div x-html="logs"></div>
+            </div>
+
+            <div class="log">
+                <h3>Received Data:</h3>
+                <div x-html="dataLogs"></div>
+            </div>
+
+            <div id="testChart" style="width: 100%; height: 400px"></div>
+        </div>
+
         <script>
-            let wsClient = null;
+            // Check library loading status
+            function checkLibraryStatus() {
+                const pusherStatus = document.getElementById("pusher-status");
+                const echoStatus = document.getElementById("echo-status");
+                const alpineStatus = document.getElementById("alpine-status");
 
-            // Fungsi untuk menambahkan log ke UI
-            function addLog(message, type = "log") {
-                const log = document.getElementById("log");
-                const entry = document.createElement("div");
-                entry.className = `log-entry ${type}`;
-                entry.innerHTML = `<span>${new Date().toLocaleTimeString()}</span> - ${message}`;
-                log.appendChild(entry);
-                log.scrollTop = log.scrollHeight;
-            }
-
-            // Fungsi untuk memperbarui status koneksi di UI
-            function updateStatus(state, text) {
-                const status = document.getElementById("status");
-                status.className = `status ${state}`;
-                status.textContent = text;
-            }
-
-            // Fungsi utama untuk menginisialisasi koneksi WebSocket
-            function initializeWebSocket() {
-                addLog("Initializing WebSocket...", "info");
-
-                wsClient = new ScadaWebSocketClient({
-                    onConnect: () => {
-                        updateStatus("connected", "Connected");
-                        addLog(
-                            "Successfully connected to WebSocket server!",
-                            "success"
-                        );
-
-                        // Setelah terhubung, subscribe ke channel yang diinginkan
-                        const channelName = "scada-channel";
-                        const eventName = "scada.data.received";
-                        addLog(
-                            `Subscribing to channel "${channelName}" for event "${eventName}"...`
-                        );
-
-                        wsClient.subscribe(channelName, eventName, (data) => {
-                            addLog(
-                                `Received data: ${JSON.stringify(data)}`,
-                                "data"
-                            );
-                        });
-                    },
-                    onDisconnect: () => {
-                        updateStatus("disconnected", "Disconnected");
-                        addLog("WebSocket connection lost.", "error");
-                    },
-                    onError: (error) => {
-                        addLog(
-                            `WebSocket error: ${
-                                error.message || "An unknown error occurred"
-                            }`,
-                            "error"
-                        );
-                    },
-                });
-            }
-
-            // Fungsi untuk memulai koneksi dari tombol
-            function connectWebSocket() {
-                if (wsClient) {
-                    addLog("Already connected or connecting.", "warn");
-                    return;
-                }
-                updateStatus("connecting", "Connecting...");
-                initializeWebSocket();
-            }
-
-            // Fungsi untuk memutus koneksi dari tombol
-            function disconnectWebSocket() {
-                if (wsClient) {
-                    wsClient.disconnect();
-                    wsClient = null;
-                    updateStatus("disconnected", "Disconnected by user");
-                    addLog("Disconnected by user.", "info");
+                if (typeof Pusher !== "undefined") {
+                    pusherStatus.textContent =
+                        "✅ Loaded (v" + Pusher.VERSION + ")";
+                    pusherStatus.style.color = "green";
                 } else {
-                    addLog("Not connected.", "warn");
+                    pusherStatus.textContent = "❌ Not Loaded";
+                    pusherStatus.style.color = "red";
+                }
+
+                if (typeof Echo !== "undefined") {
+                    echoStatus.textContent = "✅ Loaded";
+                    echoStatus.style.color = "green";
+                } else {
+                    echoStatus.textContent = "❌ Not Loaded";
+                    echoStatus.style.color = "red";
+                }
+
+                if (typeof Alpine !== "undefined") {
+                    alpineStatus.textContent = "✅ Loaded";
+                    alpineStatus.style.color = "green";
+                } else {
+                    alpineStatus.textContent = "❌ Not Loaded";
+                    alpineStatus.style.color = "red";
                 }
             }
 
-            // Send test data via API
-            function sendTestData() {
-                if (!wsClient) {
-                    addLog("Please connect to WebSocket first.", "warn");
-                    return;
-                }
-
-                const testData = {
-                    temperature: (20 + Math.random() * 20).toFixed(1),
-                    humidity: (40 + Math.random() * 40).toFixed(1),
-                    pressure: (1000 + Math.random() * 50).toFixed(1),
-                    timestamp: new Date().toISOString(),
-                };
-
-                addLog(
-                    `Sending test data: ${JSON.stringify(testData)}`,
-                    "info"
-                );
-
-                fetch("/api/receiver", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-TOKEN":
-                            document
-                                .querySelector('meta[name="csrf-token"]')
-                                ?.getAttribute("content") || "",
-                    },
-                    body: JSON.stringify(testData),
-                })
-                    .then((response) => response.json())
-                    .then((data) => {
-                        addLog(
-                            `Test data sent successfully. Response: ${JSON.stringify(
-                                data
-                            )}`,
-                            "success"
-                        );
-                    })
-                    .catch((error) => {
-                        addLog(`Error sending test data: ${error}`, "error");
-                    });
-            }
-
-            // Clear logs
-            function clearLogs() {
-                const log = document.getElementById("log");
-                if (log) log.innerHTML = "";
-            }
-
+            // Check when page loads
             document.addEventListener("DOMContentLoaded", function () {
-                addLog("Page loaded, ready to connect.", "info");
-                updateStatus("disconnected", "Disconnected");
+                setTimeout(checkLibraryStatus, 1000);
             });
+
+            function websocketTest() {
+                return {
+                    isConnected: false,
+                    connectionStatus: {
+                        class: "disconnected",
+                        text: "Disconnected",
+                    },
+                    dataStatus: {
+                        class: "disconnected",
+                        text: "No Data Received",
+                    },
+                    logs: "",
+                    dataLogs: "",
+                    echo: null,
+                    chart: null,
+
+                    init() {
+                        this.log("Initializing WebSocket test...");
+
+                        // Wait for libraries to be fully loaded
+                        setTimeout(() => {
+                            this.initEcho();
+                            this.initChart();
+                        }, 500);
+                    },
+
+                    initEcho() {
+                        try {
+                            // Check if libraries are available
+                            if (typeof Pusher === "undefined") {
+                                throw new Error("Pusher library not loaded");
+                            }
+
+                            if (typeof Echo === "undefined") {
+                                throw new Error("Echo library not loaded");
+                            }
+
+                            this.log(
+                                "Libraries check passed, initializing Echo..."
+                            );
+
+                            // Initialize Laravel Echo with Reverb
+                            this.echo = new Echo({
+                                broadcaster: "pusher", // Use pusher for compatibility
+                                key: "scada_dashboard_key_2024",
+                                wsHost: "127.0.0.1",
+                                wsPort: 8080,
+                                wssPort: 8080,
+                                forceTLS: false,
+                                enabledTransports: ["ws"],
+                                disableStats: true,
+                                useTLS: false,
+                                encrypted: false,
+                                timeout: 30000,
+                                keepAlive: true,
+                                keepAliveInterval: 25000,
+                            });
+
+                            this.log("Echo initialized successfully");
+                            this.setupEchoListeners();
+                        } catch (error) {
+                            this.log(
+                                "Failed to initialize Echo: " + error.message,
+                                "error"
+                            );
+                            this.log(
+                                "Error details: " + JSON.stringify(error),
+                                "error"
+                            );
+                        }
+                    },
+
+                    setupEchoListeners() {
+                        if (!this.echo) {
+                            this.log(
+                                "Echo not available, cannot setup listeners",
+                                "error"
+                            );
+                            return;
+                        }
+
+                        try {
+                            // Check if connector and pusher are available
+                            if (!this.echo.connector) {
+                                this.log(
+                                    "Echo connector not available",
+                                    "error"
+                                );
+                                return;
+                            }
+
+                            if (!this.echo.connector.pusher) {
+                                this.log(
+                                    "Echo pusher connector not available",
+                                    "error"
+                                );
+                                return;
+                            }
+
+                            const pusher = this.echo.connector.pusher;
+
+                            pusher.connection.bind("connected", () => {
+                                this.log(
+                                    "✅ WebSocket connected successfully!"
+                                );
+                                this.isConnected = true;
+                                this.connectionStatus = {
+                                    class: "connected",
+                                    text: "Connected",
+                                };
+                                this.subscribeToChannels();
+                            });
+
+                            pusher.connection.bind("disconnected", () => {
+                                this.log("❌ WebSocket disconnected");
+                                this.isConnected = false;
+                                this.connectionStatus = {
+                                    class: "disconnected",
+                                    text: "Disconnected",
+                                };
+                            });
+
+                            pusher.connection.bind("error", (error) => {
+                                this.log(
+                                    "❌ WebSocket error: " + error.message,
+                                    "error"
+                                );
+                                this.connectionStatus = {
+                                    class: "error",
+                                    text: "Error: " + error.message,
+                                };
+                            });
+
+                            this.log("Echo listeners setup completed");
+                        } catch (error) {
+                            this.log(
+                                "Error setting up Echo listeners: " +
+                                    error.message,
+                                "error"
+                            );
+                        }
+                    },
+
+                    subscribeToChannels() {
+                        if (!this.echo) {
+                            this.log(
+                                "Echo not available for subscription",
+                                "error"
+                            );
+                            return;
+                        }
+
+                        try {
+                            // Subscribe to multiple channels
+                            this.echo
+                                .channel("scada-data")
+                                .listen("scada.data.received", (data) => {
+                                    this.log(
+                                        "📡 Data received from scada-data channel"
+                                    );
+                                    this.handleData(data);
+                                });
+
+                            this.echo
+                                .channel("scada-realtime")
+                                .listen("scada.data.received", (data) => {
+                                    this.log(
+                                        "📡 Data received from scada-realtime channel"
+                                    );
+                                    this.handleData(data);
+                                });
+
+                            this.echo
+                                .channel("scada-analysis")
+                                .listen("scada.data.received", (data) => {
+                                    this.log(
+                                        "📡 Data received from scada-analysis channel"
+                                    );
+                                    this.handleData(data);
+                                });
+
+                            this.log("Subscribed to all SCADA channels");
+                        } catch (error) {
+                            this.log(
+                                "Error subscribing to channels: " +
+                                    error.message,
+                                "error"
+                            );
+                        }
+                    },
+
+                    handleData(data) {
+                        this.log("📊 Processing data: " + JSON.stringify(data));
+
+                        // Extract actual data
+                        let actualData = data;
+                        if (data && data.data) {
+                            actualData = data.data;
+                        }
+
+                        // Add to data logs
+                        this.addDataLog(actualData);
+
+                        // Update chart if we have numeric data
+                        this.updateChart(actualData);
+
+                        // Update data status
+                        this.dataStatus = {
+                            class: "connected",
+                            text:
+                                "Data Received: " +
+                                new Date().toLocaleTimeString(),
+                        };
+                    },
+
+                    addDataLog(data) {
+                        const timestamp = new Date().toLocaleTimeString();
+                        this.dataLogs += `<div class="data-item">
+                        <strong>${timestamp}</strong>: ${JSON.stringify(data)}
+                    </div>`;
+
+                        // Keep only last 20 items
+                        if (
+                            this.dataLogs.split('<div class="data-item">')
+                                .length > 21
+                        ) {
+                            this.dataLogs = this.dataLogs
+                                .split('<div class="data-item">')
+                                .slice(-20)
+                                .join('<div class="data-item">');
+                        }
+                    },
+
+                    initChart() {
+                        const layout = {
+                            title: "Real-time Data Test",
+                            xaxis: { title: "Time" },
+                            yaxis: { title: "Value" },
+                            showlegend: true,
+                        };
+
+                        Plotly.newPlot("testChart", [], layout);
+                        this.chart = document.getElementById("testChart");
+                    },
+
+                    updateChart(data) {
+                        if (!this.chart || !data) return;
+
+                        try {
+                            // Look for numeric values in the data
+                            const numericData = [];
+                            const timestamp =
+                                data.timestamp || new Date().toISOString();
+
+                            Object.keys(data).forEach((key) => {
+                                if (
+                                    typeof data[key] === "number" &&
+                                    key !== "data_count"
+                                ) {
+                                    numericData.push({
+                                        name: key,
+                                        value: data[key],
+                                    });
+                                }
+                            });
+
+                            if (numericData.length > 0) {
+                                // Update chart with new data
+                                const traces = numericData.map(
+                                    (item, index) => ({
+                                        x: [timestamp],
+                                        y: [item.value],
+                                        mode: "lines+markers",
+                                        name: item.name,
+                                        type: "scatter",
+                                    })
+                                );
+
+                                Plotly.extendTraces(this.chart, traces);
+                            }
+                        } catch (error) {
+                            this.log(
+                                "Chart update error: " + error.message,
+                                "error"
+                            );
+                        }
+                    },
+
+                    testConnection() {
+                        this.log("🧪 Testing connection...");
+                        if (this.echo) {
+                            this.log("Echo instance: Available");
+                            if (this.echo.connector) {
+                                this.log("Echo connector: Available");
+                                if (this.echo.connector.pusher) {
+                                    this.log("Echo pusher: Available");
+                                    this.log(
+                                        "Connection state: " +
+                                            this.echo.connector.pusher
+                                                .connection.state
+                                    );
+                                } else {
+                                    this.log(
+                                        "Echo pusher: Not available",
+                                        "error"
+                                    );
+                                }
+                            } else {
+                                this.log(
+                                    "Echo connector: Not available",
+                                    "error"
+                                );
+                            }
+                        } else {
+                            this.log("Echo instance: Not available", "error");
+                        }
+                    },
+
+                    checkLibraries() {
+                        this.log("🔍 Checking library status...");
+                        checkLibraryStatus();
+                    },
+
+                    testDataFlow() {
+                        this.log("🧪 Testing data flow...");
+                        // Simulate incoming data
+                        const testData = {
+                            timestamp: new Date().toISOString(),
+                            temperature: Math.random() * 30 + 20,
+                            humidity: Math.random() * 40 + 40,
+                            pressure: Math.random() * 200 + 1000,
+                        };
+
+                        this.handleData(testData);
+                    },
+
+                    log(message, type = "info") {
+                        const timestamp = new Date().toLocaleTimeString();
+                        const color =
+                            type === "error"
+                                ? "red"
+                                : type === "success"
+                                ? "green"
+                                : "black";
+
+                        this.logs += `<div style="color: ${color}; margin: 2px 0;">
+                        <strong>${timestamp}</strong>: ${message}
+                    </div>`;
+
+                        // Keep only last 50 logs
+                        if (this.logs.split('<div style="color:').length > 51) {
+                            this.logs = this.logs
+                                .split('<div style="color:')
+                                .slice(-50)
+                                .join('<div style="color:');
+                        }
+
+                        console.log(message);
+                    },
+
+                    clearLogs() {
+                        this.logs = "";
+                        this.dataLogs = "";
+                    },
+                };
+            }
         </script>
     </body>
 </html>

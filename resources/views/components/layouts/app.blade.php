@@ -852,6 +852,10 @@
     {{-- tambahan buat dropdown select (graph-analysis) --}}
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    {{-- Muat Vite assets di layout utama untuk menghindari duplikasi --}}
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
+
     {{-- Stack untuk scripts tambahan --}}
     @stack('scripts')
 

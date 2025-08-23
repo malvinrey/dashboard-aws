@@ -1,4 +1,5 @@
 ﻿{
-    "QueueWorker":  23184,
-    "Reverb":  6096
+    "Reverb":  4988,
+    "QueueWorker":  10208,
+    "Laravel":  23040
 }

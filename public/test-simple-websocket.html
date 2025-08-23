@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Simple WebSocket Test</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 20px;
+            }
+            .status {
+                padding: 10px;
+                margin: 10px 0;
+                border-radius: 5px;
+            }
+            .success {
+                background-color: #d4edda;
+                color: #155724;
+            }
+            .error {
+                background-color: #f8d7da;
+                color: #721c24;
+            }
+            .warning {
+                background-color: #fff3cd;
+                color: #856404;
+            }
+            .log {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                padding: 10px;
+                margin: 10px 0;
+                max-height: 300px;
+                overflow-y: auto;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>🔧 Simple WebSocket Test</h1>
+
+        <div id="status" class="status warning">Initializing...</div>
+
+        <div>
+            <button onclick="testLibraries()">Test Libraries</button>
+            <button onclick="testConnection()">Test Connection</button>
+            <button onclick="clearLogs()">Clear Logs</button>
+        </div>
+
+        <div class="log">
+            <h3>Test Logs:</h3>
+            <div id="logs"></div>
+        </div>
+
+        <script>
+            let logs = [];
+
+            function log(message, type = "info") {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = `[${timestamp}] ${message}`;
+                logs.push(logEntry);
+
+                const logsDiv = document.getElementById("logs");
+                logsDiv.innerHTML = logs
+                    .map((log) => `<div>${log}</div>`)
+                    .join("");
+                logsDiv.scrollTop = logsDiv.scrollHeight;
+
+                console.log(logEntry);
+            }
+
+            function updateStatus(message, type = "warning") {
+                const statusDiv = document.getElementById("status");
+                statusDiv.textContent = message;
+                statusDiv.className = `status ${type}`;
+            }
+
+            function testLibraries() {
+                log("🧪 Testing library availability...");
+
+                // Test Pusher
+                if (typeof Pusher !== "undefined") {
+                    log("✅ Pusher library loaded successfully");
+                    log(`   Version: ${Pusher.VERSION || "Unknown"}`);
+                } else {
+                    log("❌ Pusher library NOT loaded", "error");
+                }
+
+                // Test Echo
+                if (typeof Echo !== "undefined") {
+                    log("✅ Echo library loaded successfully");
+                } else {
+                    log("❌ Echo library NOT loaded", "error");
+                }
+
+                // Test global objects
+                log(`Global Pusher: ${typeof window.Pusher}`);
+                log(`Global Echo: ${typeof window.Echo}`);
+
+                updateStatus("Library test completed", "success");
+            }
+
+            function testConnection() {
+                log("🧪 Testing WebSocket connection...");
+
+                if (typeof Echo === "undefined") {
+                    log(
+                        "❌ Echo not available, cannot test connection",
+                        "error"
+                    );
+                    return;
+                }
+
+                try {
+                    // Try to create Echo instance
+                    const echo = new Echo({
+                        broadcaster: "pusher",
+                        key: "scada_dashboard_key_2024",
+                        wsHost: "127.0.0.1",
+                        wsPort: 8080,
+                        wssPort: 8080,
+                        forceTLS: false,
+                        enabledTransports: ["ws"],
+                        disableStats: true,
+                        useTLS: false,
+                        encrypted: false,
+                    });
+
+                    log("✅ Echo instance created successfully");
+
+                    // Check connector
+                    if (echo.connector) {
+                        log("✅ Echo connector available");
+
+                        if (echo.connector.pusher) {
+                            log("✅ Echo pusher connector available");
+
+                            // Test connection
+                            const pusher = echo.connector.pusher;
+                            log(`Connection state: ${pusher.connection.state}`);
+
+                            // Bind to connection events
+                            pusher.connection.bind("connected", () => {
+                                log("🎉 WebSocket connected successfully!");
+                                updateStatus(
+                                    "Connected to WebSocket",
+                                    "success"
+                                );
+                            });
+
+                            pusher.connection.bind("disconnected", () => {
+                                log("❌ WebSocket disconnected");
+                                updateStatus(
+                                    "Disconnected from WebSocket",
+                                    "error"
+                                );
+                            });
+
+                            pusher.connection.bind("error", (error) => {
+                                log(
+                                    `❌ WebSocket error: ${error.message}`,
+                                    "error"
+                                );
+                                updateStatus("WebSocket error", "error");
+                            });
+
+                            pusher.connection.bind("connecting", () => {
+                                log("🔄 WebSocket connecting...");
+                                updateStatus("Connecting...", "warning");
+                            });
+                        } else {
+                            log(
+                                "❌ Echo pusher connector not available",
+                                "error"
+                            );
+                        }
+                    } else {
+                        log("❌ Echo connector not available", "error");
+                    }
+                } catch (error) {
+                    log(
+                        `❌ Failed to create Echo instance: ${error.message}`,
+                        "error"
+                    );
+                    log(`Error details: ${JSON.stringify(error)}`, "error");
+                }
+            }
+
+            function clearLogs() {
+                logs = [];
+                document.getElementById("logs").innerHTML = "";
+            }
+
+            // Auto-test on page load
+            document.addEventListener("DOMContentLoaded", function () {
+                log("📄 Page loaded, starting library test...");
+                updateStatus("Page loaded, ready for testing", "warning");
+
+                // Wait a bit for libraries to load
+                setTimeout(() => {
+                    testLibraries();
+                }, 1000);
+            });
+        </script>
+    </body>
+</html>
